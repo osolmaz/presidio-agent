@@ -28,6 +28,9 @@ def analyse(scan: Image.Image, cache: str):
     lines = vl.locate_lines(scan)
     labels = fields.label_lines(lines)
     for ln, lab in zip(lines, labels):
+        # Consistency: every date on the page moves by the same shift, also the ones the model missed.
+        if lab == "none" and re.search(r"\b\d{2}\.\d{2}\.\d{4}\b", ln["text"]):
+            lab = "date"
         ln["field"] = lab
     json.dump(lines, open(cache, "w"), indent=1, ensure_ascii=False)
     return lines
@@ -52,8 +55,7 @@ def make_copy(scan, lines, seed, verify=True):
         new_text = values.replace(ln["field"], ln["text"], person, rng)
         if new_text == ln["text"]:
             continue
-        mono = ln["field"] in ("card_number", "terminal_id")
-        out, padded = render.replace_line(out, ln["box"], new_text, rng, mono=mono)
+        out, padded = render.replace_line(out, ln["box"], new_text, ln["text"])
         change = {"field": ln["field"], "old": ln["text"], "new": new_text, "box": list(ln["box"])}
         if verify:
             got = vl.read_text(out.crop(padded))
