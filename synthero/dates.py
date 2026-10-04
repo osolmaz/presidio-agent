@@ -57,28 +57,56 @@ def _name(month: int, like: str) -> str:
     return name.upper() if like.isupper() and len(like) > 1 else name.lower() if like.islower() else name
 
 
-def _shift(m: re.Match[str], days: int) -> str:  # noqa: PLR0911  one return per written form
-    g = m.groupdict()
+Groups = dict[str, str]
+
+
+def _iso(g: Groups, days: int) -> str:
+    return (dt.date(int(g["iy"]), int(g["im"]), int(g["id"])) + dt.timedelta(days)).isoformat()
+
+
+def _dot(g: Groups, days: int) -> str:
+    d = dt.date(_full_year(g.get("dy")), int(g["dm"]), int(g["dd"])) + dt.timedelta(days)
+    return f"{_pad(d.day, g['dd'])}.{_pad(d.month, g['dm'])}.{_year(d.year, g.get('dy'))}"
+
+
+def _slash(g: Groups, days: int) -> str:
+    d = dt.date(_full_year(g["sy"]), int(g["sm"]), int(g["sd"])) + dt.timedelta(days)
+    return f"{_pad(d.day, g['sd'])}/{_pad(d.month, g['sm'])}/{_year(d.year, g['sy'])}"
+
+
+def _day_month_year(g: Groups, days: int) -> str:
+    d = dt.date(_full_year(g.get("ny")), _LOOKUP[g["nm"].lower()][1], int(g["nd"])) + dt.timedelta(days)
+    year = f" {_year(d.year, g.get('ny'))}" if g.get("ny") else ""
+    return f"{_pad(d.day, g['nd'])}{g['ndot']} {_name(d.month, g['nm'])}{g['nmdot']}{year}"
+
+
+def _month_day_year(g: Groups, days: int) -> str:
+    d = dt.date(int(g["mdy_y"]), _LOOKUP[g["md"].lower()][1], int(g["mdd"])) + dt.timedelta(days)
+    return f"{_name(d.month, g['md'])}{g['mddot']} {_pad(d.day, g['mdd'])}{g['comma']} {d.year}"
+
+
+def _month_year(g: Groups, days: int) -> str:
+    """A month alone moves by whole months, at least one."""
+    months = max(1, round(days / 30.44)) if days > 0 else min(-1, round(days / 30.44))
+    index = int(g["moy"]) * 12 + _LOOKUP[g["mo"].lower()][1] - 1 + months
+    return f"{_name(index % 12 + 1, g['mo'])} {index // 12}"
+
+
+FORMS = {
+    "iso": _iso,
+    "dot": _dot,
+    "slash": _slash,
+    "dmy": _day_month_year,
+    "mdy": _month_day_year,
+    "my": _month_year,
+}
+
+
+def _shift(m: re.Match[str], days: int) -> str:
+    groups = {k: v for k, v in m.groupdict().items() if v is not None}
+    form = next(name for name in FORMS if name in groups)
     try:
-        if g["iso"]:
-            d = dt.date(int(g["iy"]), int(g["im"]), int(g["id"])) + dt.timedelta(days)
-            return d.isoformat()
-        if g["dot"]:
-            d = dt.date(_full_year(g["dy"]), int(g["dm"]), int(g["dd"])) + dt.timedelta(days)
-            return f"{_pad(d.day, g['dd'])}.{_pad(d.month, g['dm'])}.{_year(d.year, g['dy'])}"
-        if g["slash"]:
-            d = dt.date(_full_year(g["sy"]), int(g["sm"]), int(g["sd"])) + dt.timedelta(days)
-            return f"{_pad(d.day, g['sd'])}/{_pad(d.month, g['sm'])}/{_year(d.year, g['sy'])}"
-        if g["dmy"]:
-            d = dt.date(_full_year(g["ny"]), _LOOKUP[g["nm"].lower()][1], int(g["nd"])) + dt.timedelta(days)
-            year = f" {_year(d.year, g['ny'])}" if g["ny"] else ""
-            return f"{_pad(d.day, g['nd'])}{g['ndot']} {_name(d.month, g['nm'])}{g['nmdot']}{year}"
-        if g["mdy"]:
-            d = dt.date(int(g["mdy_y"]), _LOOKUP[g["md"].lower()][1], int(g["mdd"])) + dt.timedelta(days)
-            return f"{_name(d.month, g['md'])}{g['mddot']} {_pad(d.day, g['mdd'])}{g['comma']} {d.year}"
-        months = max(1, round(days / 30.44)) if days > 0 else min(-1, round(days / 30.44))
-        index = int(g["moy"]) * 12 + _LOOKUP[g["mo"].lower()][1] - 1 + months
-        return f"{_name(index % 12 + 1, g['mo'])} {index // 12}"
+        return FORMS[form](groups | {k: "" for k in ("ndot", "nmdot", "mddot", "comma") if k not in groups}, days)
     except ValueError:  # not a real date, such as 31.02.
         return m.group(0)
 

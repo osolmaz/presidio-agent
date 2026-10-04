@@ -8,11 +8,14 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
       - uses: astral-sh/setup-uv@v7
       - name: Fonts used to redraw values, and poppler for PDFs
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation fonts-dejavu-core poppler-utils
