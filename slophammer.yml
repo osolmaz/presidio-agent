@@ -1,0 +1,22 @@
+python:
+  coverage:
+    threshold: 85
+    paths:
+      - synthero
+  complexity:
+    max: 8
+  dry:
+    max_findings: 0
+    paths:
+      - synthero
+    copied_blocks:
+      enabled: true
+      min_tokens: 100
+  mutation:
+    targets:
+      - synthero/match.py
+      - synthero/geometry.py
+      - synthero/values.py
+      - synthero/leak.py
+      - synthero/detect.py
+      - synthero/barcode.py

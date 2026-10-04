@@ -1,13 +1,20 @@
-"""Replace the text in one line box and paste it back into the scan.
+"""Redraw one located value in a scan; every other word keeps its pixels.
 
-Only pixels inside the box change; the rest of the scan is copied unchanged,
-so repeated edits cannot degrade the page.
-
-The model's box is only roughly right, so `snap_box` finds the real ink of the
-line around it first. The new text is drawn in the regular or bold font whose
-stroke density is closer to the original, at the original letter height.
+The old value's ink is erased (every connected piece of it, but never above or
+below its own line) and the new value is drawn in the Liberation font whose
+rendering of the old value best matches the original's width and ink density,
+at the original letter height. Measurements always come from the original scan,
+so repeated edits on one page cannot degrade it.
 """
+
+from __future__ import annotations
+
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+from synthero.geometry import Box, gray_values, paper_level, pixels
+
+Font = ImageFont.FreeTypeFont
+RGB = tuple[int, int, int]
 
 FONTS = {
     # Liberation Sans has Arial's widths and Liberation Mono has Courier's, the
@@ -19,110 +26,30 @@ FONTS = {
 }
 
 
-def _percentile(values, q):
-    values = sorted(values)
-    return values[min(len(values) - 1, int(len(values) * q))]
-
-
-def paper_level(gray: Image.Image) -> int:
-    return _percentile(list(gray.getdata()), 0.90)
-
-
-def snap_box(scan: Image.Image, box, grow_y=0.6, grow_x=40):
-    """Return the tight ink bounds of the text line that the model's box points at."""
-    gray = scan.convert("L")
-    x1, y1, x2, y2 = box
-    h = max(4, y2 - y1)
-    sx1, sx2 = max(0, x1 - grow_x), min(scan.width, x2 + grow_x)
-    sy1, sy2 = max(0, int(y1 - grow_y * h)), min(scan.height, int(y2 + grow_y * h))
-    region = gray.crop((sx1, sy1, sx2, sy2))
-    w, rh = region.size
-    cut = paper_level(region) - 70
-    px = region.load()
-    # Table rules: a row inked across most of the width, or a column inked down
-    # most of the height, is a line of the form, not text.
-    def longest_run(values):
-        best = run = 0
-        for v in values:
-            run = run + 1 if v else 0
-            best = max(best, run)
-        return best
-
-    # A table line is one long unbroken run of ink; text always has gaps.
-    rule_rows = {y for y in range(rh) if longest_run(px[x, y] < cut for x in range(w)) > max(20, 0.2 * w)}
-    rule_cols = {x for x in range(w) if longest_run(px[x, y] < cut for y in range(rh)) > 0.45 * rh}
-    rows = [0 if y in rule_rows else sum(1 for x in range(w) if x not in rule_cols and px[x, y] < cut)
-            for y in range(rh)]
-
-    # The ink band nearest the middle of the model's box.
-    centre = (y1 + y2) // 2 - sy1
-    inked = [r > 1 for r in rows]
-    if not any(inked):
-        return box
-    start = min((y for y in range(rh) if inked[y]), key=lambda y: abs(y - centre))
-    top = bottom = start
-    while top > 0 and (inked[top - 1] or (top > 1 and inked[top - 2])):
-        top -= 1
-    while bottom < rh - 1 and (inked[bottom + 1] or (bottom < rh - 2 and inked[bottom + 2])):
-        bottom += 1
-
-    band_h = bottom - top + 1
-    # Stay within a few pixels of the model's box sideways, and drop vertical
-    # cell lines (columns inked down almost the whole band).
-    reach = max(6, int(1.5 * h))  # the model's box can be off by a word's width
-    lo, hi = max(0, x1 - sx1 - reach), min(w, x2 - sx1 + reach)
-    cols = [lo <= x < hi and x not in rule_cols
-            and 0 < sum(1 for y in range(top, bottom + 1) if px[x, y] < cut) < 0.85 * band_h for x in range(w)]
-    ink_cols = [x for x in range(w) if cols[x]]
-    # A vertical cell line ends the text line: split there and keep the part that
-    # overlaps the model's box the most, so a neighbouring cell's text stays out.
-    # A cell line, unlike a letter stem, also runs above and below the text band.
-    # The test uses the two rows right next to the band: a horizontal cell line a few
-    # rows away is inked across every column and must not count.
-    def reaches_out(x):
-        above = all(0 <= y < rh and px[x, y] < cut for y in (top - 1, top - 2))
-        below = all(0 <= y < rh and px[x, y] < cut for y in (bottom + 1, bottom + 2))
-        return above and below
-
-    walls = [x for x in range(lo, hi)
-             if sum(1 for y in range(top, bottom + 1) if px[x, y] < cut) >= 0.85 * band_h and reaches_out(x)]
-    if walls and ink_cols:
-        parts, cur = [], [ink_cols[0]]
-        for x in ink_cols[1:]:
-            if any(cur[-1] < wx < x for wx in walls):
-                parts.append(cur)
-                cur = [x]
-            else:
-                cur.append(x)
-        parts.append(cur)
-        mx1, mx2 = x1 - sx1, x2 - sx1
-        ink_cols = max(parts, key=lambda c: sum(1 for x in c if mx1 <= x < mx2))
-    if ink_cols:
-        # Recompute the band from the kept columns only, so a neighbour cell's ink cannot stretch it.
-        rows2 = [y for y in range(rh) if y not in rule_rows and any(px[x, y] < cut for x in ink_cols)]
-        near = [y for y in rows2 if top - 2 <= y <= bottom + 2]
-        if near:
-            top, bottom = min(near), max(near)
-            band_h = bottom - top + 1
-    # Keep the model's box when the snap is clearly wrong.
-    if not ink_cols or not (0.5 * h <= band_h <= 1.6 * h):
-        return box
-    return (sx1 + ink_cols[0], sy1 + top, sx1 + ink_cols[-1] + 1, sy1 + bottom + 1)
-
-
 def _ink_density(img: Image.Image, cut: int) -> float:
-    data = list(img.convert("L").getdata())
+    data = gray_values(img)
     return sum(1 for p in data if p < cut) / max(1, len(data))
 
 
-def _render(text, font, size, ink, paper):
-    x1, y1, x2, y2 = font.getbbox(text)
-    img = Image.new("RGB", size, paper)
-    ImageDraw.Draw(img).text((-x1, (size[1] - (y2 - y1)) // 2 - y1), text, font=font, fill=ink)
+def _ink_colour(img: Image.Image, cut: int) -> RGB:
+    """Mean colour of the darker half of the ink pixels: the printed colour, not its anti-aliased rim."""
+    raw = img.convert("RGB").tobytes()
+    ink = sorted((px for px in zip(raw[0::3], raw[1::3], raw[2::3], strict=True) if sum(px) / 3 < cut), key=sum)
+    darkest = ink[: max(1, len(ink) // 2)]
+    if not darkest:
+        return (15, 15, 15)
+    r, g, b = (int(sum(c) / len(darkest)) for c in zip(*darkest, strict=True))
+    return (r, g, b)
+
+
+def _render(text: str, font: Font, size: tuple[int, int]) -> Image.Image:
+    x1, y1, _, y2 = font.getbbox(text)
+    img = Image.new("RGB", size, "white")
+    ImageDraw.Draw(img).text((-x1, (size[1] - (y2 - y1)) // 2 - y1), text, font=font, fill="black")
     return img
 
 
-def _font_for_width(path, text, target_w, max_h):
+def _font_for_width(path: str, text: str, target_w: int, max_h: int) -> Font:
     """Largest font size at which `text` is at most `target_w` wide and its capitals at most `max_h` tall."""
     for size in range(max(8, max_h * 3), 5, -1):
         f = ImageFont.truetype(path, size)
@@ -133,25 +60,34 @@ def _font_for_width(path, text, target_w, max_h):
     return ImageFont.truetype(path, 6)
 
 
-def _font_for_height(path, text, target_h, max_w=None):
-    """Font size whose letter height matches the original, and whose width fits the original line."""
-    # Plain capitals and digits only: accents such as the dots of Ö would make the font too small.
-    probe = "".join(c for c in text if c in "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") or "H"
-    size = 6
-    for s in range(max(6, target_h * 2), 5, -1):
-        f = ImageFont.truetype(path, s)
-        _, t, _, b = f.getbbox(probe)
-        x1, _, x2, _ = f.getbbox(text)
-        if b - t <= target_h and (max_w is None or x2 - x1 <= max_w):
-            size = s
-            break
-    return ImageFont.truetype(path, size)
+def _match_style(original: Image.Image, old: str, ink_h: int, cut: int) -> tuple[Font, float]:
+    """Render the OLD value in each font and keep the one closest to the original pixels.
+
+    Returns the font and its width correction, which is applied to the new value too, so
+    a value of the same length takes the same space. Width is robust against "@",
+    descenders, and umlauts; ink density tells regular from bold.
+    """
+    orig_w = max(1, original.width)
+    target = _ink_density(original, cut)
+    best: tuple[float, Font, float] | None = None
+    for bold in (False, True):
+        for mono in (False, True):
+            f = _font_for_width(FONTS[(bold, mono)], old, orig_w, ink_h + 1)
+            x1, _, x2, _ = f.getbbox(old)
+            ow = max(1, int(x2 - x1))
+            score = abs(ow - orig_w) / orig_w + 2 * abs(_ink_density(_render(old, f, (ow, ink_h + 2)), 128) - target)
+            if mono:  # monospace only when it fits clearly better than the normal font
+                score *= 1.6
+            if best is None or score < best[0]:
+                best = (score, f, orig_w / ow)
+    assert best is not None
+    return best[1], best[2]
 
 
-def _free_right(gray: Image.Image, box, cut, gap=1, limit=400):
-    """x of the next ink to the right of the line (another word, or a cell line), or the page edge."""
-    x1, y1, x2, y2 = box
-    px = gray.load()
+def _free_right(gray: Image.Image, box: Box, cut: int, gap: int = 1, limit: int = 400) -> int:
+    """x of the next ink to the right of the box (another word, or a cell line), or the page edge."""
+    _, y1, x2, y2 = box
+    px = pixels(gray)
     blank = 0
     for x in range(x2, min(gray.width, x2 + limit)):
         if any(px[x, y] < cut for y in range(y1, y2)):
@@ -163,10 +99,10 @@ def _free_right(gray: Image.Image, box, cut, gap=1, limit=400):
     return min(gray.width, x2 + limit)
 
 
-def _free_vertical(gray: Image.Image, box, cut, step, limit=12):
-    """Blank rows above (step -1) or below (step +1) the line, before the neighbouring line's ink."""
+def _free_vertical(gray: Image.Image, box: Box, cut: int, step: int, limit: int = 12) -> int:
+    """Blank rows above (step -1) or below (step +1) the box, before the neighbouring line's ink."""
     x1, y1, x2, y2 = box
-    px = gray.load()
+    px = pixels(gray)
     y = y1 - 1 if step < 0 else y2
     n = 0
     while 0 <= y < gray.height and n < limit:
@@ -177,124 +113,68 @@ def _free_vertical(gray: Image.Image, box, cut, step, limit=12):
     return n
 
 
-def word_spans(gray: Image.Image, box, cut):
-    """Split a line's ink into words at gaps wider than about a third of the letter height."""
-    x1, y1, x2, y2 = box
-    px = gray.load()
-    min_gap = max(3, int((y2 - y1) * 0.35))
-    spans, start, blank = [], None, 0
-    for x in range(x1, x2):
-        inked = any(px[x, y] < cut for y in range(y1, y2))
-        if inked:
-            if start is None:
-                start = x
-            elif blank >= min_gap:
-                spans.append((start, x - blank))
-                start = x
-            blank = 0
-        elif start is not None:
-            blank += 1
-    if start is not None:
-        spans.append((start, x2 - blank))
-    return spans
+def _value_rows(gray: Image.Image, x1: int, x2: int, y1: int, y2: int, cut: int) -> tuple[int, int]:
+    """The run's own ink rows inside the line, ignoring vertical cell lines.
 
-
-def replace_words(scan: Image.Image, box, old_line: str, new_line: str, a: int, b: int, new_run: str, pad=6,
-                  source: Image.Image = None, run_box=None, next_x=None, old_run=None):
-    """Redraw words a..b (inclusive) of a line with `new_run`; every other word keeps its pixels.
-
-    Falls back to redrawing the whole line as `new_line` when the line's ink cannot be
-    split into exactly its words. Measurements come from `source` (the original scan),
-    so earlier edits on the same line do not disturb them. Returns the new scan and
-    the line's area.
-
-    With `run_box` (exact OCR word boxes of the words to replace), `box` is taken as the
-    exact line box and no pixel splitting is needed; `next_x` is where the next kept
-    word starts, and `old_run` the text being replaced.
+    A value can be printed smaller than its label ("Nr.:" bold, the number regular).
     """
-    dest = scan
-    scan = source if source is not None else dest
-    tight = tuple(box) if run_box is not None else snap_box(scan, box)
-    tx1, ty1, tx2, ty2 = tight
-    ink_h = ty2 - ty1
-    gray = scan.convert("L")
-    local = gray.crop((max(0, tx1 - 20), max(0, ty1 - 10), min(scan.width, tx2 + 20), min(scan.height, ty2 + 10)))
+    px = pixels(gray)
+    band = max(1, y2 - y1)
+    cols = [x for x in range(x1, x2) if sum(1 for y in range(y1, y2) if px[x, y] < cut) < 0.7 * band]
+    rows = [y for y in range(y1, y2) if any(px[x, y] < cut for x in cols)]
+    return (rows[0], rows[-1] + 1) if rows else (y1, y2)
+
+
+def replace_words(
+    dest: Image.Image,
+    source: Image.Image,
+    line_box: Box,
+    run_box: Box,
+    old: str,
+    new: str,
+    next_x: int | None = None,
+    pad: int = 6,
+) -> tuple[Image.Image, Box]:
+    """Redraw the words in `run_box` (inside the line `line_box`) as `new`.
+
+    `dest` is the page so far, `source` the original scan, which all measurements use.
+    `next_x` is where the next kept word on the line starts. Returns the new page and
+    the area to read back.
+    """
+    gray = source.convert("L")
+    lx1, ly1, lx2, ly2 = line_box
+    vx1, vx2 = run_box[0], run_box[2]
+    local = gray.crop((max(0, lx1 - 20), max(0, ly1 - 10), min(gray.width, lx2 + 20), min(gray.height, ly2 + 10)))
     paper_v = paper_level(local)
     cut = paper_v - 70
-    paper = (paper_v,) * 3
-
-    old_words = old_line.split()
-    if run_box is not None:  # exact OCR word boxes
-        split_ok = True
-        vx1, vx2 = run_box[0], run_box[2]
-        draw_text, old_value = new_run, old_run or new_run
-    else:  # split the line's ink into words
-        spans = word_spans(gray, tight, cut)
-        split_ok = len(spans) == len(old_words)
-        if split_ok:
-            vx1, vx2 = spans[a][0], spans[b][1]
-            next_x = spans[b + 1][0] if b + 1 < len(spans) else None
-            draw_text, old_value = new_run, " ".join(old_words[a:b + 1])
-        else:
-            vx1, vx2, next_x = tx1, tx2, None
-            draw_text, old_value = new_line, old_line
-    # The value can be printed smaller than its label ("Nr.:" bold, the number regular),
-    # so measure the run's own ink rows, without vertical cell lines.
-    px = gray.load()
-    band = max(1, ty2 - ty1)
-    vcols = [x for x in range(vx1, vx2) if sum(1 for y in range(ty1, ty2) if px[x, y] < cut) < 0.7 * band]
-    vrows = [y for y in range(ty1, ty2) if any(px[x, y] < cut for x in vcols)]
-    if vrows and split_ok:
-        ty1, ty2 = vrows[0], vrows[-1] + 1
-        ink_h = ty2 - ty1
+    paper: RGB = (paper_v, paper_v, paper_v)
+    ty1, ty2 = _value_rows(gray, vx1, vx2, ly1, ly2, cut)
+    ink_h = ty2 - ty1
     value_box = (vx1, ty1, vx2, ty2)
-
-    orig = scan.crop(value_box).convert("RGB")
-    ink_px = sorted(p for p in orig.getdata() if sum(p) / 3 < cut)
-    ink = tuple(int(sum(c) / len(ink_px)) for c in zip(*ink_px[: max(1, len(ink_px) // 2)])) if ink_px else (15, 15, 15)
-
-    # Style: render the OLD value in each font at the measured height and keep the one
-    # closest to the original pixels in width and ink density. Its width correction is
-    # applied to the new value too, so a value of the same length takes the same space.
-    orig_w = max(1, vx2 - vx1)
-    target = _ink_density(orig, cut)
-    best = None
-    for bold in (False, True):
-        for mono in (False, True):
-            path = FONTS[(bold, mono)]
-            # The largest size at which the OLD text is no wider than the original and
-            # no taller than its ink: width is robust against "@", descenders, and umlauts.
-            f = _font_for_width(path, old_value, orig_w, ink_h + 1)
-            ow = max(1, f.getbbox(old_value)[2] - f.getbbox(old_value)[0])
-            r = _render(old_value, f, (ow, ink_h + 2), (0, 0, 0), (255, 255, 255))
-            density = _ink_density(r, 128)
-            score = abs(ow - orig_w) / orig_w + 2 * abs(density - target)
-            if mono:  # monospace only when it fits clearly better than the normal font
-                score *= 1.6
-            if best is None or score < best[0]:
-                best = (score, f, orig_w / ow)
-    _, font, width_scale = best
+    original = source.crop(value_box)
+    ink = _ink_colour(original, cut)
+    font, width_scale = _match_style(original, old, ink_h, cut)
 
     # Free space to the right (next word or cell line) and above/below (neighbouring lines).
     right = next_x - 4 if next_x is not None else _free_right(gray, value_box, cut)
-    pad_top = min(pad, _free_vertical(gray, tight, cut, -1))
-    pad_bottom = min(pad, _free_vertical(gray, tight, cut, +1))
-    gx1, _, gx2, _ = font.getbbox(draw_text)
-    text_w = gx2 - gx1
+    pad_top = min(pad, _free_vertical(gray, line_box, cut, -1))
+    pad_bottom = min(pad, _free_vertical(gray, line_box, cut, +1))
+    gx1, _, gx2, _ = font.getbbox(new)
+    text_w = int(gx2 - gx1)
     max_w = max(vx2 - vx1, right - vx1 - 3)
     squeeze = min(width_scale, max_w / max(1, text_w))
 
     # Draw with the tops of the capitals on the original's top ink row.
-    cap_top = font.getbbox("H")[1]
+    cap_top = int(font.getbbox("H")[1])
     canvas_h = ink_h + pad_top + pad_bottom
     canvas = Image.new("L", (text_w + 2, canvas_h + 8), 0)
-    ImageDraw.Draw(canvas).text((-gx1 + 1, pad_top - cap_top), draw_text, font=font, fill=255)
+    ImageDraw.Draw(canvas).text((-gx1 + 1, pad_top - cap_top), new, font=font, fill=255)
     canvas = canvas.crop((0, 0, canvas.width, canvas_h))
     if abs(squeeze - 1.0) > 0.01:
-        canvas = canvas.resize((max(1, int(canvas.width * squeeze)), canvas_h), Image.LANCZOS)
+        canvas = canvas.resize((max(1, int(canvas.width * squeeze)), canvas_h), Image.Resampling.LANCZOS)
 
-    area_x2 = min(scan.width, max(vx2, vx1 + canvas.width) + pad, max(right, vx2 + 1))
-    area = (max(0, vx1 - pad), max(0, ty1 - pad_top), area_x2, min(scan.height, ty2 + pad_bottom))
+    area_x2 = min(source.width, max(vx2, vx1 + canvas.width) + pad, max(right, vx2 + 1))
+    area = (max(0, vx1 - pad), max(0, ty1 - pad_top), area_x2, min(source.height, ty2 + pad_bottom))
     w, h = area[2] - area[0], area[3] - area[1]
     patch = Image.new("RGB", (w, h), paper)
     noise = Image.effect_noise((w, h), 8).convert("RGB")
@@ -312,12 +192,27 @@ def replace_words(scan: Image.Image, box, old_line: str, new_line: str, a: int, 
     # outside the box, so no sliver of an old letter survives.
     erase_old_ink(out, gray, value_box, cut, ink_h, paper)
     out.paste(patch, area[:2], mask)
-    line_area = (min(area[0], tight[0]), min(area[1], tight[1]), max(area[2], tight[2]), max(area[3], tight[3]))
-    return out, line_area
+    read_area = (min(area[0], lx1), min(area[1], ly1), max(area[2], lx2), max(area[3], ly2))
+    return out, read_area
 
 
-def erase_old_ink(out: Image.Image, gray: Image.Image, value_box, cut, ink_h, paper):
-    """Paint paper over all ink connected to the old value, plus one pixel around it.
+def _component(ink: list[list[bool]], seen: list[list[bool]], start: tuple[int, int]) -> list[tuple[int, int]]:
+    """All ink pixels 4-connected to `start`; marks them in `seen`."""
+    h, w = len(ink), len(ink[0])
+    stack, comp = [start], []
+    seen[start[1]][start[0]] = True
+    while stack:
+        x, y = stack.pop()
+        comp.append((x, y))
+        for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if 0 <= nx < w and 0 <= ny < h and ink[ny][nx] and not seen[ny][nx]:
+                seen[ny][nx] = True
+                stack.append((nx, ny))
+    return comp
+
+
+def erase_old_ink(out: Image.Image, gray: Image.Image, value_box: Box, cut: int, ink_h: int, paper: RGB) -> None:
+    """Paint paper over all ink connected to the old value, plus its anti-aliased rim.
 
     Table lines touch the value too; a piece much taller or wider than the text is
     left alone.
@@ -329,30 +224,23 @@ def erase_old_ink(out: Image.Image, gray: Image.Image, value_box, cut, ink_h, pa
     rx1, ry1 = max(0, vx1 - m), max(0, vy1 - 2)
     rx2, ry2 = min(gray.width, vx2 + 3 * m), min(gray.height, vy2 + 2)
     w, h = rx2 - rx1, ry2 - ry1
-    px = gray.load()
+    if w <= 0 or h <= 0:
+        return
+    px = pixels(gray)
     ink = [[px[rx1 + x, ry1 + y] < cut for x in range(w)] for y in range(h)]
     seen = [[False] * w for _ in range(h)]
     keep = Image.new("L", (w, h), 0)
-    kp = keep.load()
-    for sy in range(vy1 - ry1, vy2 - ry1):
-        for sx in range(vx1 - rx1, vx2 - rx1):
-            if not (0 <= sy < h and 0 <= sx < w) or not ink[sy][sx] or seen[sy][sx]:
-                continue
-            stack, comp = [(sx, sy)], []
-            seen[sy][sx] = True
-            while stack:
-                x, y = stack.pop()
-                comp.append((x, y))
-                for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-                    if 0 <= nx < w and 0 <= ny < h and ink[ny][nx] and not seen[ny][nx]:
-                        seen[ny][nx] = True
-                        stack.append((nx, ny))
-            xs = [p[0] for p in comp]
-            ys = [p[1] for p in comp]
-            if max(ys) - min(ys) > 2.2 * ink_h or max(xs) - min(xs) > 3 * (vx2 - vx1 + ink_h):
-                continue  # a table line, not a letter
-            for x, y in comp:
-                kp[x, y] = 255
-    keep = keep.filter(ImageFilter.MaxFilter(5))  # the grey anti-aliased rim around each letter
-    paper_img = Image.new("RGB", (w, h), paper)
-    out.paste(paper_img, (rx1, ry1), keep)
+    kp = pixels(keep)
+    seeds = [(x, y) for y in range(max(0, vy1 - ry1), min(h, vy2 - ry1)) for x in range(vx1 - rx1, min(w, vx2 - rx1))]
+    for sx, sy in seeds:
+        if not ink[sy][sx] or seen[sy][sx]:
+            continue
+        comp = _component(ink, seen, (sx, sy))
+        xs = [p[0] for p in comp]
+        ys = [p[1] for p in comp]
+        if max(ys) - min(ys) > 2.2 * ink_h or max(xs) - min(xs) > 3 * (vx2 - vx1 + ink_h):
+            continue  # a table line, not a letter
+        for x, y in comp:
+            kp[x, y] = 255
+    keep = keep.filter(ImageFilter.MaxFilter(5))
+    out.paste(Image.new("RGB", (w, h), paper), (rx1, ry1), keep)

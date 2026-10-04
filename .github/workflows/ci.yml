@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+      - name: Fonts used to redraw values
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff format --check .
+      - run: ruff check .
+      - run: mypy synthero tests
+      - run: pytest --cov=synthero --cov-fail-under=85
+      - name: Mutation testing behind the kill-rate floor
+        run: python scripts/check-mutation.py --min-kill-rate 85
+      - name: Audit dependencies
+        run: |
+          python -m pip freeze --exclude-editable > /tmp/requirements.txt
+          uvx pip-audit -r /tmp/requirements.txt --disable-pip --no-deps
+      - run: uvx slophammer-py@0.5.0 dry .
+      - run: uvx slophammer-py@0.5.0 check .
