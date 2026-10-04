@@ -18,7 +18,8 @@ def _data_url(img: Image.Image) -> str:
 
 
 def chat(content, max_tokens=4096, timeout=900) -> str:
-    body = {"messages": [{"role": "user", "content": content}], "temperature": 0, "max_tokens": max_tokens}
+    body = {"messages": [{"role": "user", "content": content}], "temperature": 0, "max_tokens": max_tokens,
+            "chat_template_kwargs": {"enable_thinking": False}}
     req = urllib.request.Request(BASE + "/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:

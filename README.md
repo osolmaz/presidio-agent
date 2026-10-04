@@ -15,7 +15,7 @@ and numbers, and writes an answer key for each copy.
 python3 -m fakescan SCAN.png --n 3          # outputs go to /dev/shm/fake-scan/out
 ```
 
-It needs a Qwen3-VL-8B llama-server with its vision projector at
+It needs a vision llama-server (tested: Qwen3.8-27B Q6_K with its mmproj) at
 `FAKESCAN_VL` (default `http://127.0.0.1:18930`).
 
 Prototype. Outputs are synthetic test data; never commit them.
