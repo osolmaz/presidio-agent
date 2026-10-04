@@ -186,6 +186,18 @@ def test_make_copy_fails_the_leak_check_for_a_value_it_could_not_locate():
     assert copy.key["pages"][0]["leak_check"] == {"passed": False, "leaked_types": ["person"]}
 
 
+def test_a_value_the_replacer_cannot_change_fails_the_leak_check():
+    img = page([(20, 20, "Zeitraum: Q3")])
+    gray = img.convert("L")
+    line = geometry.ink_lines(gray)[0]
+    value = Value("Q3", "date", "document", (0, 0, 600, 300))  # no date form the replacer knows
+    loc = locate.Located(value, line, line, None, "ocr", "Q3")
+    copy = synth.make_copy(
+        [synth.Analysed(img, [value], [[loc]], "Zeitraum:")], seed=1, read_page=lambda p: "Zeitraum: Q3"
+    )
+    assert copy.key["pages"][0]["leak_check"]["passed"] is False
+
+
 def test_one_document_gets_one_identity_across_pages():
     img = page([(20, 20, "LEON HARTMANN")])
     gray = img.convert("L")

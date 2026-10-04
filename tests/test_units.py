@@ -7,7 +7,7 @@ import random
 import pytest
 from PIL import Image, ImageDraw
 
-from synthero import barcode, detect, geometry, leak, locate, match, values
+from synthero import barcode, dates, detect, geometry, leak, locate, match, values
 from synthero.detect import Value
 
 
@@ -155,7 +155,7 @@ def test_replacer_types():
     mail = r.replace("leon@web.de", "email", "customer")
     assert mail == mail.lower() and mail.endswith("@example.com") and "." in mail.split("@")[0]
     assert r.replace("leon@web.de", "email", "customer") == mail
-    assert r.replace("12.07.2026", "date", "doc") == values.shift_dates("12.07.2026", r.day_shift)
+    assert r.replace("12.07.2026", "date", "doc") == dates.shift("12.07.2026", r.day_shift)
     assert r.replace("11:10", "time", "doc") == values.shift_times("11:10", r.minute_shift)
 
 
@@ -183,10 +183,42 @@ def test_same_shape_keeps_separators_and_never_starts_with_zero():
     assert values.same_shape("Ä", rng) == "Ä"
 
 
-def test_shift_dates_full_short_and_invalid():
-    assert values.shift_dates("am 30.12.2025 bis 31.12.", 2) == "am 01.01.2026 bis 02.01."
-    assert values.shift_dates("31.02.2026 und 31.02.", 1) == "31.02.2026 und 31.02."
-    assert values.shift_dates("1.2.2026", 1) == "1.2.2026"
+def test_dates_keep_their_written_form():
+    cases = {
+        "am 30.12.2025 bis 31.12.": "am 19.01.2026 bis 20.01.",
+        "12.07.26": "01.08.26",
+        "1.2.2026": "21.2.2026",
+        "2026-07-12": "2026-08-01",
+        "12/07/2026": "01/08/2026",
+        "1. Juli 2026": "21. Juli 2026",
+        "01 Jul 2026": "21 Jul 2026",
+        "Jul 01 2026 bis Jul 31 2026": "Jul 21 2026 bis Aug 20 2026",
+        "July 1, 2026": "July 21, 2026",
+        "Juli 2026": "August 2026",
+        "DEZEMBER 2026": "JANUAR 2027",
+        "3. märz": "23. märz",
+        "31.02.2026 und 31.02.": "31.02.2026 und 31.02.",
+        "Preis 12.50 EUR, 1.234,56": "Preis 12.50 EUR, 1.234,56",
+    }
+    for old, new in cases.items():
+        assert dates.shift(old, 20) == new, old
+    assert dates.shift("Juli 2026", -20) == "Juni 2026"
+    assert dates.shift("Juli 2026", 70) == "September 2026"
+
+
+def test_iban_and_card_numbers_stay_valid():
+    rng = random.Random(1)
+    assert values.iban_check("DE", "370400440532013000") == "89"  # the standard example IBAN
+    new = values.iban_like("DE92 1000 0000 1357 9246 80", rng)
+    compact = new.replace(" ", "")
+    assert new[:2] == "DE" and [len(p) for p in new.split()] == [4, 4, 4, 4, 4, 2]
+    assert values.iban_check("DE", compact[4:]) == compact[2:4] and compact != "DE92100000001357924680"
+    card = values.card_like("4111 1111 1111 1111", rng)
+    assert values.luhn_ok(card.replace(" ", "")) and len(card) == 19 and card[4] == " "
+    assert values.luhn_ok("4111111111111111") and not values.luhn_ok("4111111111111112")
+    masked = values.card_like("************7318", rng)
+    assert masked.startswith("************") and masked != "************7318"
+    assert values.iban_like("no iban here 12", rng) != "no iban here 12"
 
 
 def test_shift_times_wraps_and_keeps_seconds():
@@ -221,6 +253,10 @@ def test_leak_check_whole_page():
 
 
 # --- detect --------------------------------------------------------------
+
+
+def test_parse_strips_label_punctuation():
+    assert detect.parse([{"text": ": Clara Neumann,", "type": "person"}], 10, 10)[0].text == "Clara Neumann"
 
 
 def test_parse_defaults_and_scaling():

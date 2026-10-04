@@ -13,6 +13,7 @@ from PIL import Image
 
 from synthero import vl
 
+EDGE_PUNCTUATION = " \t:;,"  # a label's colon or a list's comma is not part of the value
 TYPES = ("person", "street", "city", "email", "phone", "date", "time", "id", "card", "iban")
 
 PROMPT = """This is a scanned invoice or receipt. List every piece of personal data and every
@@ -79,7 +80,7 @@ def parse(answer: object, width: int, height: int) -> list[Value]:
     for item in answer if isinstance(answer, list) else []:
         if not isinstance(item, dict):
             continue
-        text = str(item.get("text") or "").strip()
+        text = str(item.get("text") or "").strip(EDGE_PUNCTUATION)
         type_ = item.get("type")
         box = item.get("bbox_2d")
         if not text or type_ not in TYPES:

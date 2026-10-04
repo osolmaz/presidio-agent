@@ -51,7 +51,7 @@ testpaths = ["tests"]
 # cli.py, vl.py, and ocr.py are IO and are covered by behaviour tests.
 [tool.mutmut]
 paths_to_mutate = ["synthero/match.py", "synthero/geometry.py", "synthero/values.py", "synthero/leak.py",
-                   "synthero/detect.py", "synthero/barcode.py"]
+                   "synthero/detect.py", "synthero/barcode.py", "synthero/dates.py"]
 tests_dir = ["tests/"]
 also_copy = ["synthero/"]
 

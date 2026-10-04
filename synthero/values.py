@@ -8,9 +8,10 @@ reserved example.com domain. Dates and times on a page all move by one shift.
 
 from __future__ import annotations
 
-import datetime as dt
 import random
 import re
+
+from synthero import dates
 
 FIRST = ["Jonas", "Mira", "Selin", "Tobias", "Lena", "Arda", "Clara", "Noah", "Ida", "Emil", "Nora", "Felix"]
 LAST = ["Brandt", "Okafor", "Aydin", "Kessler", "Vogt", "Lindqvist", "Hahn", "Moreau", "Petrovic", "Sauer"]
@@ -66,7 +67,7 @@ class Replacer:
     def _new(self, text: str, type_: str, owner: str) -> str:
         p = self.identity(owner)
         if type_ in ("date", "time"):
-            return shift_dates(text, self.day_shift) if type_ == "date" else shift_times(text, self.minute_shift)
+            return dates.shift(text, self.day_shift) if type_ == "date" else shift_times(text, self.minute_shift)
         has_digits = bool(re.search(r"\d", text))
         made = {
             # A surname alone, as "KELLER", stays a surname.
@@ -75,7 +76,11 @@ class Replacer:
             "city": f"{p.postal} {p.city}" if re.search(r"\d{5}", text) else p.city,
             "email": f"{ascii_mail(p.first)}.{ascii_mail(p.last)}@example.com",
         }
-        return made.get(type_) or same_shape(text, self.rng)  # id, card, iban, phone
+        if type_ == "iban":
+            return iban_like(text, self.rng)
+        if type_ == "card":
+            return card_like(text, self.rng)
+        return made.get(type_) or same_shape(text, self.rng)  # id, phone
 
 
 def match_case(new: str, old: str) -> str:
@@ -105,23 +110,49 @@ def same_shape(old: str, rng: random.Random) -> str:
     return "".join(out)
 
 
-def shift_dates(text: str, days: int) -> str:
-    def full(m: re.Match[str]) -> str:
-        try:
-            d = dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1))) + dt.timedelta(days=days)
-        except ValueError:
-            return m.group(0)
-        return f"{d.day:02d}.{d.month:02d}.{d.year}"
+def iban_check(country: str, bban: str) -> str:
+    """The two IBAN check digits (ISO 13616, mod 97) for a country code and account part."""
+    digits = "".join(str(int(c, 36)) for c in bban + country + "00")
+    return f"{98 - int(digits) % 97:02d}"
 
-    def short(m: re.Match[str]) -> str:  # "13.07." without a year
-        try:
-            d = dt.date(2026, int(m.group(2)), int(m.group(1))) + dt.timedelta(days=days)
-        except ValueError:
-            return m.group(0)
-        return f"{d.day:02d}.{d.month:02d}."
 
-    text = re.sub(r"\b(\d{2})\.(\d{2})\.(\d{4})\b", full, text)
-    return re.sub(r"\b(\d{2})\.(\d{2})\.(?!\d)", short, text)
+def iban_like(old: str, rng: random.Random) -> str:
+    """A valid IBAN in the old one's layout: same country, length, and spacing; new account digits."""
+    compact = re.sub(r"\s", "", old)
+    m = re.search(r"[A-Z]{2}\d{2}[A-Z0-9]{8,30}", compact)
+    if m is None:
+        return same_shape(old, rng)
+    iban = m.group(0)
+    country = iban[:2]
+    bban = "".join(str(rng.randint(0, 9)) if c.isdigit() else c for c in iban[4:])
+    new = country + iban_check(country, bban) + bban
+    out, chars = [], iter(new)
+    for c in old[old.find(iban[0]) :]:  # keep the old spacing
+        out.append(c if c.isspace() else next(chars, ""))
+    return old[: old.find(iban[0])] + "".join(out) + "".join(chars)
+
+
+def luhn_ok(digits: str) -> bool:
+    total = 0
+    for i, c in enumerate(reversed(digits)):
+        d = int(c) * (2 if i % 2 else 1)
+        total += d - 9 if d > 9 else d
+    return total % 10 == 0
+
+
+def card_like(old: str, rng: random.Random) -> str:
+    """New card digits in the same layout; a full card number keeps a valid Luhn check digit.
+
+    Masked numbers ("************7318") keep their stars and get new visible digits.
+    """
+    new = same_shape(old, rng)
+    digits = re.sub(r"\D", "", new)
+    if len(digits) < 12 or "*" in old or "X" in old.upper().replace("EXP", ""):
+        return new
+    body = digits[:-1]
+    check = next(str(c) for c in range(10) if luhn_ok(body + str(c)))
+    last = max(i for i, c in enumerate(new) if c.isdigit())
+    return new[:last] + check + new[last + 1 :]
 
 
 def shift_times(text: str, minutes: int) -> str:

@@ -20,3 +20,4 @@ python:
       - synthero/leak.py
       - synthero/detect.py
       - synthero/barcode.py
+      - synthero/dates.py

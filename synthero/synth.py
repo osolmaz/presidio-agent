@@ -243,7 +243,10 @@ def _copy_page(
         olds = sorted(
             {(v.type, t) for v, ps in zip(vals, locs, strict=True) for t in [v.text] + [p.printed for p in ps]}
         )
-        leaks = leak.check(read_page(out), olds, page.context, [c["new"] for c in private])
+        # A value the replacer could not change is a leak, and must not excuse itself.
+        changed = [c["new"] for c in private if c["new"] != c["old"]]
+        leaks = leak.check(read_page(out), olds, page.context, changed)
+        leaks += [{"type": c["type"], "pieces": ["(unchanged)"]} for c in private if c["new"] == c["old"]]
         key["leak_check"] = {"passed": not leaks, "leaked_types": sorted({x["type"] for x in leaks})}
         private_page["leaks"] = leaks
     return out, key, private_page
