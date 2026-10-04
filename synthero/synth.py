@@ -95,9 +95,31 @@ class Copy:
 
 
 def printed_text(v: Value, places: list[Located]) -> str:
-    """What is printed for the value: the most common reading over its places, else the model's."""
+    """What is printed for the value: the most common reading over its places, else the model's.
+
+    The parts of a value wrapped over two lines are joined in order.
+    """
+    parts = sorted((p for p in places if p.words is not None), key=lambda p: p.words or (0, 0))
+    if parts:
+        return " ".join(p.printed for p in parts)
     texts = [p.printed for p in places]
     return max(texts, key=texts.count) if texts else v.text
+
+
+def part_of(new: str, words: tuple[int, int] | None, total: int) -> str:
+    """The words of the new value that a place prints, for a value wrapped over lines."""
+    if words is None:
+        return new
+    tokens = new.split()
+    if len(tokens) < 2:  # one word: split its characters
+        tokens = list(new)
+    n = len(tokens)
+
+    def split(i: int) -> int:  # the same share of the words, and never an empty line
+        return i if n == total else (0 if i == 0 else n if i == total else min(max(round(i * n / total), 1), n - 1))
+
+    joiner = " " if len(new.split()) > 1 else ""
+    return joiner.join(tokens[split(words[0]) : split(words[1])])
 
 
 def page_line_height(locs: list[list[Located]]) -> int:
@@ -178,11 +200,13 @@ def _edit_value(
     line_h: int,
 ) -> tuple[Image.Image, list[Place]]:
     done: list[Place] = []
+    total = len(" ".join(p.printed for p in places if p.words is not None).split())
     for loc in places:
-        out, area = render.replace_words(out, scan, loc.line_box, loc.run_box, loc.printed, new, loc.next_x, style)
+        text = part_of(new, loc.words, total)
+        out, area = render.replace_words(out, scan, loc.line_box, loc.run_box, loc.printed, text, loc.next_x, style)
         place: Place = {"box": list(loc.run_box)}
         if read is not None:
-            place["read_back_ok"] = match.contains(read(out.crop(area)), new)
+            place["read_back_ok"] = match.contains(read(out.crop(area)), text)
         is_number = loc.value.type in BARCODE_TYPES
         bars = _redraw_barcode(out, scan, loc.run_box, new, line_h) if is_number else None
         if bars is not None:
@@ -271,6 +295,7 @@ def analysis_to_json(vals: list[Value], locs: list[list[Located]]) -> dict[str, 
                     "next_x": p.next_x,
                     "how": p.how,
                     "printed": p.printed,
+                    "words": list(p.words) if p.words else None,
                 }
                 for p in ps
             ]
@@ -306,12 +331,26 @@ def analysis_from_json(data: object) -> tuple[list[Value], list[list[Located]]]:
         locs.append(
             [
                 Located(
-                    v, _box(p["line_box"]), _box(p["run_box"]), _next_x(p["next_x"]), _str(p, "how"), _str(p, "printed")
+                    v,
+                    _box(p["line_box"]),
+                    _box(p["run_box"]),
+                    _next_x(p["next_x"]),
+                    _str(p, "how"),
+                    _str(p, "printed"),
+                    _span(p.get("words")),
                 )
                 for p in places
             ]
         )
     return vals, locs
+
+
+def _span(v: object) -> tuple[int, int] | None:
+    if v is None:
+        return None
+    if isinstance(v, list) and len(v) == 2 and all(isinstance(n, int) for n in v):
+        return (v[0], v[1])
+    raise ValueError(f"not a word span: {v!r}")
 
 
 def _next_x(v: object) -> int | None:

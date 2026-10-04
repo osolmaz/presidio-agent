@@ -43,8 +43,9 @@ class Located:
     line_box: Box  # the whole printed line
     run_box: Box  # exactly the value's words
     next_x: int | None  # where the next kept word on the line starts
-    how: str  # "ocr", "ocr+read", or "pixels"
+    how: str  # "ocr", "ocr+read", "pixels", or "wrapped"
     printed: str  # the text printed here, which can differ from the model's first reading
+    words: tuple[int, int] | None = None  # for a value wrapped over two lines: its words printed here
 
 
 def _union(boxes: list[Box]) -> Box:
@@ -216,6 +217,44 @@ def _value_by_line_ocr(page: Page, value: Value, line: Box, printed: str) -> Loc
     return Located(value, line, run, nxt, "pixels", printed)
 
 
+def _below(upper: Line, lower: Line, line_h: int) -> bool:
+    """The next line of the same text block: just below, and overlapping sideways."""
+    gap = lower.box[1] - upper.box[3]
+    return -line_h / 2 <= gap <= line_h and lower.box[0] < upper.box[2] and upper.box[0] < lower.box[2]
+
+
+def wrapped(page: Page, value: Value, claimed: list[Box]) -> list[Located]:
+    """A value that runs from the end of one line onto the start of the next ("IBAN DE68 /
+    1000 0000 2468 1357 90"): two places, each printing some of the value's words."""
+    n = len(value.text.split())
+    if n < 2:
+        return []
+    for i, upper in enumerate(page.lines):
+        for lower in page.lines[i + 1 :]:
+            if not _below(upper, lower, page.line_h):
+                continue
+            words = [*upper.words, *lower.words]
+            m = match.find_value(value.text, [[w.text for w in words]])
+            cut = len(upper.words)
+            if m is None or not (m.first_word < cut <= m.last_word):
+                continue
+            top, bottom = words[m.first_word : cut], words[cut : m.last_word + 1]
+            places = []
+            done = 0
+            for line, part in ((upper, top), (lower, bottom)):
+                run = _union([w.box for w in part])
+                if any(overlaps(run, c) for c in claimed):
+                    return []
+                text = " ".join(w.text for w in part)
+                count = len(text.split())
+                span = (done, done + count)  # in printed words, over both parts
+                nxt = next((w.box[0] for w in line.words if w.box[0] >= run[2]), None)
+                places.append(Located(value, line.box, run, nxt, "wrapped", text, span))
+                done += count
+            return places
+    return []
+
+
 def overlaps(a: Box, b: Box, min_share: float = 0.3) -> bool:
     """True when the boxes share at least `min_share` of the smaller one's area."""
     w = min(a[2], b[2]) - max(a[0], b[0])
@@ -252,6 +291,8 @@ def locate(
         # tried for every value, on boxes nobody holds yet.
         near = [m for m in match.find_all(v.text, texts, strict=False) if not _claimed(page, m, claimed)]
         places = [p for p in (_ocr_place(page, v, m, exact=False) for m in near) if p is not None]
+        if not result[i] and not places:
+            places = wrapped(page, v, claimed)
         if not result[i] and not places:
             one = via_pixels(page, v)
             places = [one] if one is not None and not any(overlaps(one.run_box, c) for c in claimed) else []

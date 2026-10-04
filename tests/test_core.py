@@ -422,3 +422,30 @@ def test_a_corrected_reading_that_is_an_amount_is_not_taken():
     lines = [ocr.Line(tuple(ocr.Word(t, b) for t, b in zip(words, boxes, strict=True)))]
     value = Value("0000", "id", "document", (0, 0, 600, 60))
     assert locate.locate(img, [value], lines, lambda crop: "incl. 0,00% Mwst 0,00")[0] == []
+
+
+def test_a_value_wrapped_over_two_lines_is_found_and_split():
+    img = page([(20, 20, "von dem Konto IBAN DE68"), (20, 40, "1000 0000 2468 1357 90 abgebucht")])
+    gray = img.convert("L")
+    rows = sorted(geometry.ink_lines(gray), key=lambda b: b[1])
+    texts = [["von", "dem", "Konto", "IBAN", "DE68"], ["1000", "0000", "2468", "1357", "90", "abgebucht"]]
+    lines = [
+        ocr.Line(tuple(ocr.Word(t, b) for t, b in zip(words, geometry.word_boxes(gray, row), strict=True)))
+        for words, row in zip(texts, rows, strict=True)
+    ]
+    value = Value("DE68 1000 0000 2468 1357 90", "iban", "customer", (0, 0, 600, 300))
+    places = locate.locate(img, [value], lines, lambda crop: "")[0]
+    assert [(p.how, p.printed, p.words) for p in places] == [
+        ("wrapped", "DE68", (0, 1)),
+        ("wrapped", "1000 0000 2468 1357 90", (1, 6)),
+    ]
+    assert synth.printed_text(value, places) == "DE68 1000 0000 2468 1357 90"
+    assert synth.part_of("DE42 7783 5337 4068 1241 58", (1, 6), 6) == "7783 5337 4068 1241 58"
+    assert synth.part_of("A B C", (1, 6), 6) == "B C"  # another word count: the same share, never empty
+    assert synth.part_of("A B C", (0, 1), 6) == "A"
+    assert synth.part_of("ABCDEF", (0, 1), 6) == "A" and synth.part_of("ABCDEF", (1, 6), 6) == "BCDEF"
+    assert synth.part_of("ABCDEFGHIJKL", (0, 1), 6) == "AB"
+    copy = synth.make_copy([synth.Analysed(img, [value], [places], "")], seed=1)
+    assert len(copy.key["pages"][0]["changes"][0]["places"]) == 2
+    _, locs = synth.analysis_from_json(json.loads(json.dumps(synth.analysis_to_json([value], [places]))))
+    assert locs == [places]
