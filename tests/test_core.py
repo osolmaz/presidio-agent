@@ -412,3 +412,13 @@ def test_line_ocr_places_a_value_when_the_word_splits_disagree():
     assert [(p.how, p.printed) for p in places] == [("pixels", "0800/77 88 990")]
     assert places[0].run_box[0] == boxes[2][0]
     assert locate.locate(img, [value], [], lambda crop: reading)[0] == []  # without line OCR: not placed
+
+
+def test_a_corrected_reading_that_is_an_amount_is_not_taken():
+    img = page([(20, 20, "incl."), (120, 20, "0,00%"), (220, 20, "Mwst"), (320, 20, "0,00")])
+    gray = img.convert("L")
+    boxes = sorted(geometry.ink_lines(gray))
+    words = ["incl.", "0,00%", "Mwst", "0,00"]
+    lines = [ocr.Line(tuple(ocr.Word(t, b) for t, b in zip(words, boxes, strict=True)))]
+    value = Value("0000", "id", "document", (0, 0, 600, 60))
+    assert locate.locate(img, [value], lines, lambda crop: "incl. 0,00% Mwst 0,00")[0] == []

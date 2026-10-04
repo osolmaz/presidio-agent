@@ -7,7 +7,7 @@ import random
 import pytest
 from PIL import Image, ImageDraw
 
-from synthero import barcode, dates, detect, geometry, leak, locate, match, values
+from synthero import barcode, dates, detect, geometry, leak, locate, match, render, values
 from synthero.detect import Value
 
 
@@ -591,3 +591,23 @@ def test_digit_pieces_do_not_join_neighbouring_numbers():
 def test_a_date_before_a_comma_shifts_but_an_amount_does_not():
     assert dates.shift("am 31.07.2026, 17:49", 1) == "am 01.08.2026, 17:49"
     assert dates.shift("12.07,50", 1) == "12.07,50"
+
+
+def test_short_numbers_need_equal_digits():
+    assert not match.one_slip("0000", "0,00%")  # a tax rate is not the Capt.-Ref.
+    assert not match.one_slip("4512", "4513")
+    assert match.one_slip("4512", "45 12")
+    assert match.one_slip("662824", "662834")
+
+
+def test_ties_prefer_fewer_words():
+    assert match.find_value("00 031 00", [["=", "00", "031", "00"]]) == match.Match(0, 1, 3, 1.0)
+    assert match.find_all("1042", [["Rechnung", "-", "1042"]]) == [match.Match(0, 2, 2, 1.0)]
+
+
+def test_paper_noise_ignores_letter_edges():
+    clean = Image.new("L", (40, 20), 255)
+    ImageDraw.Draw(clean).text((2, 2), "Leon", fill=0)
+    assert render.paper_noise(clean, 255) == 0.0
+    grainy = Image.effect_noise((40, 20), 6).point(lambda v: min(255, 200 + v // 8))
+    assert render.paper_noise(grainy, 230) > 1

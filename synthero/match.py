@@ -45,13 +45,21 @@ def similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, na, nb).ratio()
 
 
+SLIP_MIN_DIGITS = 6
+
+
 def one_slip(value: str, reading: str) -> bool:
     """The digits are equal, or one digit was misread, dropped, or added (edit distance 1).
 
     A second reading may correct a value by one digit; two changed digits are another
-    number (a postcode 10117 is not 10178).
+    number (a postcode 10117 is not 10178). A short number with a digit changed is just
+    another number ("0000" is not "0,00"), so values under six digits need equal digits.
     """
     dv, dr = digits(value), digits(reading)
+    if dv == dr:
+        return True
+    if len(dv) < SLIP_MIN_DIGITS:
+        return False
     if abs(len(dv) - len(dr)) > 1:
         return False
     if len(dv) == len(dr):
@@ -62,6 +70,11 @@ def one_slip(value: str, reading: str) -> bool:
 
 def _digits_ok(value: str, run: str, strict: bool) -> bool:
     return same_digits(value, run) if strict else close_digits(value, run)
+
+
+def _better(score: float, a: int, b: int, best: Match) -> bool:
+    """A higher score wins; on a tie, fewer words ("00 031 00" over "= 00 031 00")."""
+    return score > best.score or (score == best.score and b - a < best.last_word - best.first_word)
 
 
 def find_value(value: str, lines: list[list[str]], min_score: float = 0.85, strict: bool = True) -> Match | None:
@@ -79,7 +92,11 @@ def find_value(value: str, lines: list[list[str]], min_score: float = 0.85, stri
             for b in range(a, min(len(words), a + target_words + 2)):
                 run = " ".join(words[a : b + 1])
                 score = similarity(value, run)
-                if score >= min_score and _digits_ok(value, run, strict) and (best is None or score > best.score):
+                if (
+                    score >= min_score
+                    and _digits_ok(value, run, strict)
+                    and (best is None or _better(score, a, b, best))
+                ):
                     best = Match(li, a, b, score)
     return best
 
@@ -97,7 +114,7 @@ def find_all(value: str, lines: list[list[str]], min_score: float = 0.85, strict
                 if score >= min_score and _digits_ok(value, run, strict):
                     runs.append(Match(li, a, b, score))
         taken: set[int] = set()
-        for m in sorted(runs, key=lambda r: -r.score):
+        for m in sorted(runs, key=lambda r: (-r.score, r.last_word - r.first_word)):
             span = set(range(m.first_word, m.last_word + 1))
             if not span & taken:
                 found.append(m)

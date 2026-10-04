@@ -9,6 +9,7 @@ new value too, so a value of the same length takes the same space.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,7 +30,7 @@ FAMILIES = {
     "Nimbus Mono PS": ("urw-base35/NimbusMonoPS-Regular.otf", "urw-base35/NimbusMonoPS-Bold.otf"),
 }
 # How much better the other weight must reproduce a value to override the page's weight.
-WEIGHT_MARGIN = 0.08
+WEIGHT_MARGIN = 0.05
 FONT_ROOTS = ("/usr/share/fonts/truetype", "/usr/share/fonts/opentype")
 
 
@@ -64,13 +65,18 @@ def ink_mask(img: Image.Image, cut: int) -> Image.Image:
 
 
 def font_for_ink_height(path: str, text: str, ink_h: int) -> Font:
-    """The largest size at which `text`'s ink is at most `ink_h` tall."""
-    for size in range(max(8, ink_h * 3), 5, -1):
-        f = ImageFont.truetype(path, size)
-        _, top, _, bottom = f.getbbox(text)
-        if bottom - top <= ink_h:
-            return f
-    return ImageFont.truetype(path, 6)
+    """The largest size at which `text`'s rendered ink is at most `ink_h` tall.
+
+    Measured on the rendered ink: some fonts' boxes include their whole line height.
+    """
+    low, high = 6, max(8, ink_h * 3)
+    while low < high:  # ink height grows with the size, so a binary search finds the largest fit
+        mid = (low + high + 1) // 2
+        if render_mask(text, ImageFont.truetype(path, mid)).height <= ink_h:
+            low = mid
+        else:
+            high = mid - 1
+    return ImageFont.truetype(path, low)
 
 
 def render_mask(text: str, font: Font) -> Image.Image:
@@ -89,13 +95,25 @@ def overlap(a: Image.Image, b: Image.Image) -> float:
     return both / either if either else 0.0
 
 
+# How much a font loses per unit of log width correction: a narrow font stretched 1.75
+# times looks like a wide one after stretching, but it is not the font that was printed.
+WIDTH_PENALTY = 0.5
+
+
 def score(target: Image.Image, old: str, ink_h: int, path: str) -> tuple[float, Font, float]:
-    """How well `old` in this font reproduces the target mask, the font, and its width correction."""
-    font = font_for_ink_height(path, old, ink_h)
+    """How well `old` in this font reproduces the target, the font, and its width correction.
+
+    The letter shapes are compared after stretching to the original's box, and the score
+    loses `WIDTH_PENALTY` per unit of |ln(stretch)|, so the font must also fit its width.
+    """
+    # Sized to the target's own height: both are cut halfway between ink and paper, while
+    # `ink_h` also counts the light anti-aliased rows and would make every font too big.
+    font = font_for_ink_height(path, old, target.height if target.height > 1 else ink_h)
     rendered = render_mask(old, font)
     w, h = max(1, target.width), max(1, target.height)
     stretched = rendered.resize((w, h), Image.Resampling.BILINEAR).point(lambda v: 255 if v >= 128 else 0)
-    return overlap(target, stretched), font, w / max(1, rendered.width)
+    scale = w / max(1, rendered.width)
+    return overlap(target, stretched) - WIDTH_PENALTY * abs(math.log(scale)), font, scale
 
 
 def target_mask(original: Image.Image) -> Image.Image:

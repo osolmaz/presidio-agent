@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 from PIL import Image
 
-from synthero import geometry, match
+from synthero import detect, geometry, match
 from synthero.detect import Value
 from synthero.geometry import Box
 from synthero.ocr import Line
@@ -100,10 +100,16 @@ def _snap(page: Page, run: Box, line: Box) -> Box:
 
 
 def _printed(reading: str, value: Value) -> str | None:
-    """The span of a full-resolution reading that holds the value."""
+    """The span of a full-resolution reading that holds the value, without a label's punctuation.
+
+    A reading that is an amount is never a personal value.
+    """
     words = reading.split()
     m = match.find_value(value.text, [words], min_score=0.75, strict=False)
-    return " ".join(words[m.first_word : m.last_word + 1]) if m else None
+    if m is None:
+        return None
+    printed = " ".join(words[m.first_word : m.last_word + 1]).strip(detect.EDGE_PUNCTUATION)
+    return None if not printed or detect.is_amount(printed) else printed
 
 
 def _ocr_place(page: Page, value: Value, m: match.Match, exact: bool) -> Located | None:
@@ -178,7 +184,8 @@ def _value_in_line(page: Page, value: Value, line: Box, reading: str) -> Located
     if m is not None and boxes is not None:
         run = _union(boxes[m.first_word : m.last_word + 1])
         nxt = boxes[m.last_word + 1][0] if m.last_word + 1 < len(boxes) else None
-        return Located(value, line, run, nxt, "pixels", " ".join(words[m.first_word : m.last_word + 1]))
+        printed = " ".join(words[m.first_word : m.last_word + 1]).strip(detect.EDGE_PUNCTUATION)
+        return Located(value, line, run, nxt, "pixels", printed or value.text)
     same_words = len(value.text.split()) == len(words)
     if same_words and match.similarity(reading, value.text) >= 0.85 and match.one_slip(value.text, reading):
         return Located(value, line, line, None, "pixels", reading.strip())

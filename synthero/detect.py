@@ -13,7 +13,7 @@ from PIL import Image
 
 from synthero import vl
 
-EDGE_PUNCTUATION = " \t:;,"  # a label's colon or a list's comma is not part of the value
+EDGE_PUNCTUATION = " \t:;,=-\u2013\u2014|("  # a label's colon, a list's comma, a title's dash: not the value
 TYPES = ("person", "street", "city", "email", "phone", "date", "time", "id", "card", "iban")
 
 PROMPT = """This is a scanned invoice or receipt. List every piece of personal data and every

@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from synthero import fonts
-from synthero.geometry import Box, paper_level, pixels
+from synthero.geometry import Box, gray_values, paper_level, pixels
 
 RGB = tuple[int, int, int]
 
@@ -62,13 +62,26 @@ def _free_vertical(gray: Image.Image, box: Box, cut: int, step: int, limit: int 
 def _value_rows(gray: Image.Image, x1: int, x2: int, y1: int, y2: int, cut: int) -> tuple[int, int]:
     """The run's own ink rows inside the line, ignoring vertical cell lines.
 
-    A value can be printed smaller than its label ("Nr.:" bold, the number regular).
+    A value can be printed smaller than its label ("Nr.:" bold, the number regular). A
+    cell line runs on above and below the line; a letter's stem stays inside it, even
+    when a text layer's box is as tight as the letters.
     """
     px = pixels(gray)
-    band = max(1, y2 - y1)
-    cols = [x for x in range(x1, x2) if sum(1 for y in range(y1, y2) if px[x, y] < cut) < 0.7 * band]
+    above, below = max(0, y1 - 3), min(gray.height - 1, y2 + 2)
+    cols = [x for x in range(x1, x2) if not (px[x, above] < cut and px[x, below] < cut)]
     rows = [y for y in range(y1, y2) if any(px[x, y] < cut for x in cols)]
     return (rows[0], rows[-1] + 1) if rows else (y1, y2)
+
+
+def paper_noise(gray: Image.Image, paper_v: int) -> float:
+    """The paper's grain: the robust spread (median absolute deviation, as a standard
+    deviation) of the pixels within 30 levels of the paper.
+
+    The anti-aliased edges of letters are few, so they do not move the median; a clean
+    digital page has none.
+    """
+    deviations = sorted(abs(v - paper_v) for v in gray_values(gray) if v >= paper_v - 30)
+    return 1.4826 * deviations[len(deviations) // 2] if deviations else 0.0
 
 
 @dataclass(frozen=True)
@@ -141,13 +154,16 @@ def replace_words(
     area_x2 = min(source.width, max(vx2, vx1 + canvas.width) + pad, max(right, vx2 + 1))
     area = (max(0, vx1 - pad), max(0, ty1 - pad_top), area_x2, min(source.height, ty2 + pad_bottom))
     w, h = area[2] - area[0], area[3] - area[1]
+    grain = paper_noise(gray.crop(area), m.paper)
     patch = Image.new("RGB", (w, h), paper)
-    noise = Image.effect_noise((w, h), 8).convert("RGB")
-    patch = Image.blend(patch, Image.composite(noise, patch, noise.convert("L").point(lambda v: 60)), 0.1)
+    if grain >= 1:  # the paper's own grain, zero-mean: a clean digital page stays clean
+        noise = Image.effect_noise((w, h), grain).convert("RGB")
+        patch = ImageChops.add(patch, noise, scale=1.0, offset=-128)
     text_mask = Image.new("L", (w, h), 0)
     text_mask.paste(canvas, (vx1 - area[0], 0))
     patch.paste(Image.new("RGB", (w, h), ink), (0, 0), text_mask)
-    patch = patch.filter(ImageFilter.GaussianBlur(0.35))
+    if grain >= 1:  # a scan's letters are slightly soft
+        patch = patch.filter(ImageFilter.GaussianBlur(0.35))
     mask = Image.new("L", (w, h), 0)
     # Solid over the old ink, soft only at the outer edge, which is blank paper.
     ImageDraw.Draw(mask).rectangle((2, 0 if pad_top < 3 else 2, w - 3, h - 1 if pad_bottom < 3 else h - 3), fill=255)
