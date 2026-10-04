@@ -199,13 +199,22 @@ def word_spans(gray: Image.Image, box, cut):
     return spans
 
 
-def replace_line(scan: Image.Image, box, new_text: str, old_text: str = "", pad=6):
-    """Return a new scan where the words that differ between old_text and new_text are redrawn.
+def replace_words(scan: Image.Image, box, old_line: str, new_line: str, a: int, b: int, new_run: str, pad=6,
+                  source: Image.Image = None, run_box=None, next_x=None, old_run=None):
+    """Redraw words a..b (inclusive) of a line with `new_run`; every other word keeps its pixels.
 
-    Words they share at the start (labels such as "Datum:") keep their original pixels.
-    Also returns the changed area.
+    Falls back to redrawing the whole line as `new_line` when the line's ink cannot be
+    split into exactly its words. Measurements come from `source` (the original scan),
+    so earlier edits on the same line do not disturb them. Returns the new scan and
+    the line's area.
+
+    With `run_box` (exact OCR word boxes of the words to replace), `box` is taken as the
+    exact line box and no pixel splitting is needed; `next_x` is where the next kept
+    word starts, and `old_run` the text being replaced.
     """
-    tight = snap_box(scan, box)
+    dest = scan
+    scan = source if source is not None else dest
+    tight = tuple(box) if run_box is not None else snap_box(scan, box)
     tx1, ty1, tx2, ty2 = tight
     ink_h = ty2 - ty1
     gray = scan.convert("L")
@@ -214,28 +223,31 @@ def replace_line(scan: Image.Image, box, new_text: str, old_text: str = "", pad=
     cut = paper_v - 70
     paper = (paper_v,) * 3
 
-    # Keep the leading words both texts share; redraw from the first differing word.
-    old_words, new_words = old_text.split(), new_text.split()
-    k = 0
-    while k < min(len(old_words), len(new_words)) - 1 and old_words[k] == new_words[k]:
-        k += 1
-    spans = word_spans(gray, tight, cut)
-    if k and len(spans) == len(old_words):
-        vx1 = spans[k][0]
-        draw_text = " ".join(new_words[k:])
-    else:
-        vx1, draw_text = tx1, new_text
-    # The value can be printed smaller than its label ("Nr.:" bold, the number regular), so
-    # measure the value's own ink rows.
+    old_words = old_line.split()
+    if run_box is not None:  # exact OCR word boxes
+        split_ok = True
+        vx1, vx2 = run_box[0], run_box[2]
+        draw_text, old_value = new_run, old_run or new_run
+    else:  # split the line's ink into words
+        spans = word_spans(gray, tight, cut)
+        split_ok = len(spans) == len(old_words)
+        if split_ok:
+            vx1, vx2 = spans[a][0], spans[b][1]
+            next_x = spans[b + 1][0] if b + 1 < len(spans) else None
+            draw_text, old_value = new_run, " ".join(old_words[a:b + 1])
+        else:
+            vx1, vx2, next_x = tx1, tx2, None
+            draw_text, old_value = new_line, old_line
+    # The value can be printed smaller than its label ("Nr.:" bold, the number regular),
+    # so measure the run's own ink rows, without vertical cell lines.
     px = gray.load()
     band = max(1, ty2 - ty1)
-    # Leave out vertical cell lines: columns inked down most of the band.
-    vcols = [x for x in range(vx1, tx2) if sum(1 for y in range(ty1, ty2) if px[x, y] < cut) < 0.7 * band]
+    vcols = [x for x in range(vx1, vx2) if sum(1 for y in range(ty1, ty2) if px[x, y] < cut) < 0.7 * band]
     vrows = [y for y in range(ty1, ty2) if any(px[x, y] < cut for x in vcols)]
-    if vrows and k:
+    if vrows and split_ok:
         ty1, ty2 = vrows[0], vrows[-1] + 1
         ink_h = ty2 - ty1
-    value_box = (vx1, ty1, tx2, ty2)
+    value_box = (vx1, ty1, vx2, ty2)
 
     orig = scan.crop(value_box).convert("RGB")
     ink_px = sorted(p for p in orig.getdata() if sum(p) / 3 < cut)
@@ -244,8 +256,7 @@ def replace_line(scan: Image.Image, box, new_text: str, old_text: str = "", pad=
     # Style: render the OLD value in each font at the measured height and keep the one
     # closest to the original pixels in width and ink density. Its width correction is
     # applied to the new value too, so a value of the same length takes the same space.
-    old_value = " ".join(old_words[k:]) if k and len(spans) == len(old_words) else old_text
-    orig_w = max(1, tx2 - vx1)
+    orig_w = max(1, vx2 - vx1)
     target = _ink_density(orig, cut)
     best = None
     for bold in (False, True):
@@ -265,12 +276,12 @@ def replace_line(scan: Image.Image, box, new_text: str, old_text: str = "", pad=
     _, font, width_scale = best
 
     # Free space to the right (next word or cell line) and above/below (neighbouring lines).
-    right = _free_right(gray, tight, cut)
+    right = next_x - 4 if next_x is not None else _free_right(gray, value_box, cut)
     pad_top = min(pad, _free_vertical(gray, tight, cut, -1))
     pad_bottom = min(pad, _free_vertical(gray, tight, cut, +1))
     gx1, _, gx2, _ = font.getbbox(draw_text)
     text_w = gx2 - gx1
-    max_w = max(tx2 - vx1, right - vx1 - 3)
+    max_w = max(vx2 - vx1, right - vx1 - 3)
     squeeze = min(width_scale, max_w / max(1, text_w))
 
     # Draw with the tops of the capitals on the original's top ink row.
@@ -282,7 +293,7 @@ def replace_line(scan: Image.Image, box, new_text: str, old_text: str = "", pad=
     if abs(squeeze - 1.0) > 0.01:
         canvas = canvas.resize((max(1, int(canvas.width * squeeze)), canvas_h), Image.LANCZOS)
 
-    area_x2 = min(scan.width, max(tx2, vx1 + canvas.width) + pad, max(right, tx2 + 1))
+    area_x2 = min(scan.width, max(vx2, vx1 + canvas.width) + pad, max(right, vx2 + 1))
     area = (max(0, vx1 - pad), max(0, ty1 - pad_top), area_x2, min(scan.height, ty2 + pad_bottom))
     w, h = area[2] - area[0], area[3] - area[1]
     patch = Image.new("RGB", (w, h), paper)
@@ -296,10 +307,10 @@ def replace_line(scan: Image.Image, box, new_text: str, old_text: str = "", pad=
     # Solid over the old ink, soft only at the outer edge, which is blank paper.
     ImageDraw.Draw(mask).rectangle((2, 0 if pad_top < 3 else 2, w - 3, h - 1 if pad_bottom < 3 else h - 3), fill=255)
     mask = mask.filter(ImageFilter.GaussianBlur(1.5))
-    out = scan.convert("RGB").copy()
+    out = dest.convert("RGB").copy()
     # Erase every connected piece of the old value's ink first, also where it reaches
     # outside the box, so no sliver of an old letter survives.
-    erase_old_ink(out, gray, (vx1, ty1, tx2, ty2), cut, ink_h, paper)
+    erase_old_ink(out, gray, value_box, cut, ink_h, paper)
     out.paste(patch, area[:2], mask)
     line_area = (min(area[0], tight[0]), min(area[1], tight[1]), max(area[2], tight[2]), max(area[3], tight[3]))
     return out, line_area
@@ -312,9 +323,11 @@ def erase_old_ink(out: Image.Image, gray: Image.Image, value_box, cut, ink_h, pa
     left alone.
     """
     vx1, vy1, vx2, vy2 = value_box
+    # Sideways the old letters may reach past the box; up and down never past the line,
+    # so a neighbouring line's ink is never touched.
     m = max(4, ink_h)
-    rx1, ry1 = max(0, vx1 - m), max(0, vy1 - m)
-    rx2, ry2 = min(gray.width, vx2 + 3 * m), min(gray.height, vy2 + m)
+    rx1, ry1 = max(0, vx1 - m), max(0, vy1 - 2)
+    rx2, ry2 = min(gray.width, vx2 + 3 * m), min(gray.height, vy2 + 2)
     w, h = rx2 - rx1, ry2 - ry1
     px = gray.load()
     ink = [[px[rx1 + x, ry1 + y] < cut for x in range(w)] for y in range(h)]

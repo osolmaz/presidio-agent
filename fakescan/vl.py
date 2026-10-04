@@ -9,6 +9,8 @@ import urllib.request
 from PIL import Image
 
 BASE = os.environ.get("FAKESCAN_VL", "http://127.0.0.1:18930")
+# A router such as the Llama app needs the model name; a single-model server ignores it.
+MODEL = os.environ.get("FAKESCAN_MODEL")
 
 
 def _data_url(img: Image.Image) -> str:
@@ -20,6 +22,8 @@ def _data_url(img: Image.Image) -> str:
 def chat(content, max_tokens=4096, timeout=900) -> str:
     body = {"messages": [{"role": "user", "content": content}], "temperature": 0, "max_tokens": max_tokens,
             "chat_template_kwargs": {"enable_thinking": False}}
+    if MODEL:
+        body["model"] = MODEL
     req = urllib.request.Request(BASE + "/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:

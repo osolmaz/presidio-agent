@@ -20,15 +20,16 @@ def figure(src, title, body=""):
 def key_table(key):
     """New values only: the original data never appears on the page."""
     rows = "".join(
-        f"<tr><td>{html.escape(c['field'])}</td><td>{html.escape(c['new'])}</td>"
+        f"<tr><td>{html.escape(', '.join(sorted({sp['type'] + ' (' + sp['owner'] + ')' for sp in c['spans']})))}</td>"
+        f"<td>{html.escape(c['new'])}</td>"
         f"<td class={'ok' if c.get('read_back_ok') else 'bad'}>{'yes' if c.get('read_back_ok') else 'no'}</td></tr>"
         for c in key["changes"])
     lc = key.get("leak_check")
     verdict = ""
     if lc is not None:
         verdict = ('<p class=ok>Leak check passed: no original value found on the page.</p>' if lc["passed"] else
-                   f'<p class=bad>Leak check failed in: {html.escape(", ".join(lc["leaked_fields"]))}</p>')
-    return verdict + f'<table><tr><th>field</th><th>new value</th><th>read back</th></tr>{rows}</table>'
+                   f'<p class=bad>Leak check failed for: {html.escape(", ".join(lc["leaked_types"]))}</p>')
+    return verdict + f'<table><tr><th>PII (owner)</th><th>new line</th><th>read back</th></tr>{rows}</table>'
 
 
 def build(out):

@@ -2,10 +2,14 @@
 
     python3 -m fakescan SCAN.png [--n 3] [--out /dev/shm/fake-scan/out] [--seed 1]
 
-For each copy it writes copy-N.png and copy-N.json (the answer key: every
-changed field, its old and new text, its box, and whether a read-back matched).
-The text location and labels are computed once per scan and cached next to the
-outputs. Everything is written under --out, which defaults to RAM (/dev/shm).
+The model finds every text line and the exact PII spans in it (type and owner).
+Code invents consistent new values per owner and type, replaces only the span
+text, and redraws only the words that contain a span. Each copy is read back,
+and the finished page is checked for any surviving original value.
+
+Outputs (in --out): copy-N.png and copy-N.json, the public answer key with new
+values only. The original text, the spans, and the old-to-new mappings go to
+--private, which must never be served or shared.
 """
 import argparse
 import json
@@ -15,71 +19,123 @@ import re
 
 from PIL import Image, ImageDraw
 
-from . import fields, leak, render, values, vl
+from . import fields, leak, ocr, render, values, vl
 
 
 def norm(s: str) -> str:
     return re.sub(r"\s+", "", s).upper()
 
 
+def has_ink(scan: Image.Image, box, min_dark=8) -> bool:
+    """Pixel cross-check of an OCR box: it must contain ink."""
+    gray = scan.convert("L").crop(tuple(box))
+    data = list(gray.getdata())
+    if not data:
+        return False
+    paper = sorted(data)[int(len(data) * 0.9)]
+    return sum(1 for v in data if v < paper - 70) >= min_dark
+
+
 def analyse(scan: Image.Image, cache: str):
+    """OCR lines with exact word boxes, and the PII spans Bonsai marks in them. Cached per scan.
+
+    A span is located when every word it covers has an OCR box with ink in it; other
+    spans are not edited, but the leak check still searches for them.
+    """
     if os.path.exists(cache):
-        return json.load(open(cache))
-    lines = vl.locate_lines(scan)
-    labels = fields.label_lines(lines)
-    for ln, lab in zip(lines, labels):
-        # Consistency: every date on the page moves by the same shift, also the ones the model missed.
-        if lab == "none" and re.search(r"\b\d{2}\.\d{2}\.\d{4}\b", ln["text"]):
-            lab = "date"
-        ln["field"] = lab
-    json.dump(lines, open(cache, "w"), indent=1, ensure_ascii=False)
-    return lines
+        data = json.load(open(cache))
+        return data["lines"], data["spans"]
+    lines = ocr.lines(scan)
+    spans = fields.find_spans(lines, image=scan)
+    for s in spans:
+        covered = [w for w in lines[s["line"]]["words"] if w["start"] < s["end"] and s["start"] < w["end"]]
+        line_h = sorted(w["box"][3] - w["box"][1] for w in lines[s["line"]]["words"])[len(lines[s["line"]]["words"]) // 2]
+        s["located"] = (bool(covered) and all(has_ink(scan, w["box"]) for w in covered)
+                        and all(w["box"][3] - w["box"][1] <= 1.6 * line_h for w in covered))
+    json.dump({"lines": lines, "spans": spans}, open(cache, "w"), indent=1, ensure_ascii=False)
+    return lines, spans
 
 
-def debug_boxes(scan: Image.Image, lines, path: str):
+def debug_boxes(scan: Image.Image, lines, spans, path: str):
     img = scan.convert("RGB").copy()
     d = ImageDraw.Draw(img)
-    for ln in lines:
-        d.rectangle(ln["box"], outline=(220, 30, 30) if ln["field"] != "none" else (60, 140, 220), width=2)
+    pii_lines = {s["line"] for s in spans}
+    for i, ln in enumerate(lines):
+        d.rectangle(ln["box"], outline=(220, 30, 30) if i in pii_lines else (60, 140, 220), width=2)
     img.save(path)
 
 
-def changed_part(old: str, new: str) -> str:
-    """The words of `old` from the first word that differs: the value, without its label."""
-    o, n = old.split(), new.split()
-    k = 0
-    while k < min(len(o), len(n)) - 1 and o[k] == n[k]:
-        k += 1
-    return " ".join(o[k:])
+def word_runs(line: str, line_spans):
+    """Group the words that overlap a span into runs of consecutive words: [(a, b, start, end)]."""
+    words = [(m.start(), m.end()) for m in re.finditer(r"\S+", line)]
+    hit = [any(s["start"] < we and ws < s["end"] for s in line_spans) for ws, we in words]
+    runs, a = [], None
+    for i, h in enumerate(hit + [False]):
+        if h and a is None:
+            a = i
+        elif not h and a is not None:
+            runs.append((a, i - 1, words[a][0], words[i - 1][1]))
+            a = None
+    return runs
 
 
-def make_copy(scan, lines, seed, verify=True, leak_check=True):
+def apply(text: str, offset: int, repl):
+    """Replace spans [(start, end, new)] (line offsets) inside text that starts at `offset`."""
+    for start, end, new in sorted(repl, reverse=True):
+        if offset <= start and end <= offset + len(text):
+            text = text[: start - offset] + new + text[end - offset:]
+    return text
+
+
+def make_copy(scan, lines, spans, seed, verify=True, leak_check=True):
     """Return the copy, its public answer key (no old values), and the private old-to-new mapping."""
     rng = random.Random(seed)
-    person = values.Person(rng)
+    repl = values.Replacer(rng)
     out = scan.convert("RGB").copy()
     public, private = [], []
-    for ln in lines:
-        if ln["field"] == "none":
+    by_line = {}
+    for s in spans:
+        if s.get("located", True):
+            by_line.setdefault(s["line"], []).append(s)
+    for i, line_spans in sorted(by_line.items()):
+        ln = lines[i]
+        old_line = ln["text"]
+        r = [(s["start"], s["end"], repl.replace(s["text"], s["type"], s["owner"])) for s in line_spans]
+        new_line = apply(old_line, 0, r)
+        if new_line == old_line:
             continue
-        new_text = values.replace(ln["field"], ln["text"], person, rng)
-        if new_text == ln["text"]:
-            continue
-        out, padded = render.replace_line(out, ln["box"], new_text, ln["text"])
-        change = {"field": ln["field"], "new": new_text, "box": list(ln["box"])}
-        if verify:
-            change["read_back_ok"] = norm(vl.read_text(out.crop(padded))) == norm(new_text)
+        area = None
+        words = ln["words"]
+        for a, b, start, end in reversed(word_runs(old_line, line_spans)):
+            new_run = apply(old_line[start:end], start, r)
+            run_box = [min(w["box"][0] for w in words[a:b + 1]), min(w["box"][1] for w in words[a:b + 1]),
+                       max(w["box"][2] for w in words[a:b + 1]), max(w["box"][3] for w in words[a:b + 1])]
+            next_x = words[b + 1]["box"][0] if b + 1 < len(words) else None
+            out, area = render.replace_words(out, ln["box"], old_line, new_line, a, b, new_run, source=scan,
+                                             run_box=run_box, next_x=next_x, old_run=old_line[start:end])
+        change = {"line": i, "box": list(ln["box"]), "new": new_line,
+                  "spans": [{"type": s["type"], "owner": s["owner"], "new": n} for s, (_, _, n) in zip(line_spans, r)]}
+        if verify and area is not None:
+            change["read_back_ok"] = norm(vl.read_text(out.crop(area))) == norm(new_line)
         public.append(change)
-        private.append({"field": ln["field"], "old": ln["text"], "new": new_text,
-                        "old_value": changed_part(ln["text"], new_text)})
-    key = {"seed": seed, "person": vars(person), "changes": public}
+        private.append({"line": i, "old": old_line, "new": new_line,
+                        "spans": [{"type": s["type"], "owner": s["owner"], "old": s["text"], "new": n}
+                                  for s, (_, _, n) in zip(line_spans, r)]})
+    key = {"seed": seed, "changes": public}
+    private_key = {"seed": seed, "changes": private}
     if leak_check:
-        _, leaks = leak.check(out, private)
-        # The public key says which fields leaked, never the leaked text.
-        key["leak_check"] = {"passed": not leaks, "leaked_fields": [x["field"] for x in leaks]}
-        private_key = {"seed": seed, "changes": private, "leaks": leaks}
-    else:
-        private_key = {"seed": seed, "changes": private}
+        # Search for every PII value the model found, also the ones that could not be edited.
+        old_values = [(s["type"], s["text"]) for s in spans]
+        # Text on the page that is not PII (labels, the vendor's address) does not count as a leak.
+        all_by_line = {}
+        for s in spans:
+            all_by_line.setdefault(s["line"], []).append(s)
+        context = " ".join(apply(ln["text"], 0, [(s["start"], s["end"], " ") for s in all_by_line.get(i, [])])
+                           for i, ln in enumerate(lines))
+        new_values = [sp["new"] for c in private for sp in c["spans"]]
+        _, leaks = leak.check(out, old_values, context, new_values)
+        key["leak_check"] = {"passed": not leaks, "leaked_types": sorted({x["type"] for x in leaks})}
+        private_key["leaks"] = leaks
     return out, key, private_key
 
 
@@ -90,7 +146,7 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", default="/dev/shm/fake-scan/out")
     ap.add_argument("--private", default="/dev/shm/fake-scan/private",
-                    help="folder for the original text and old-to-new mappings; never serve or share it")
+                    help="folder for the original text, spans, and old-to-new mappings; never serve or share it")
     ap.add_argument("--no-verify", action="store_true")
     ap.add_argument("--no-leak-check", action="store_true")
     a = ap.parse_args()
@@ -99,24 +155,23 @@ def main():
     os.makedirs(a.private, exist_ok=True)
     scan = Image.open(a.scan).convert("RGB")
     stem = os.path.splitext(os.path.basename(a.scan))[0]
-    lines = analyse(scan, os.path.join(a.private, f"{stem}.lines.json"))
-    debug_boxes(scan, lines, os.path.join(a.out, f"{stem}.boxes.png"))
+    lines, spans = analyse(scan, os.path.join(a.private, f"{stem}.analysis.json"))
+    debug_boxes(scan, lines, spans, os.path.join(a.out, f"{stem}.boxes.png"))
     scan.save(os.path.join(a.out, f"{stem}.original.png"))
-    print(f"{len(lines)} lines, {sum(ln['field'] != 'none' for ln in lines)} to change", flush=True)
+    located = [s for s in spans if s.get("located", True)]
+    print(f"{len(lines)} lines, {len(spans)} PII spans, {len(located)} located and editable", flush=True)
 
     for i in range(a.n):
-        img, key, private_key = make_copy(scan, lines, a.seed + i, verify=not a.no_verify,
+        img, key, private_key = make_copy(scan, lines, spans, a.seed + i, verify=not a.no_verify,
                                           leak_check=not a.no_leak_check)
-        base = os.path.join(a.out, f"{stem}.copy-{i + 1}")
-        img.save(base + ".png")
-        json.dump(key, open(base + ".json", "w"), indent=1, ensure_ascii=False)
-        # The old-to-new mapping holds the original data: keep it apart and never share it.
-        json.dump(private_key, open(os.path.join(a.private, f"{stem}.copy-{i + 1}.private.json"), "w"),
-                  indent=1, ensure_ascii=False)
+        base = f"{stem}.copy-{i + 1}"
+        img.save(os.path.join(a.out, base + ".png"))
+        json.dump(key, open(os.path.join(a.out, base + ".json"), "w"), indent=1, ensure_ascii=False)
+        json.dump(private_key, open(os.path.join(a.private, base + ".private.json"), "w"), indent=1, ensure_ascii=False)
         ok = sum(c.get("read_back_ok", False) for c in key["changes"])
         lc = key.get("leak_check")
-        verdict = "" if lc is None else ("leak check passed" if lc["passed"] else f"LEAK in {lc['leaked_fields']}")
-        print(f"copy {i + 1}: {len(key['changes'])} fields changed, {ok} read back correctly, {verdict}", flush=True)
+        verdict = "" if lc is None else ("leak check passed" if lc["passed"] else f"LEAK of {lc['leaked_types']}")
+        print(f"copy {i + 1}: {len(key['changes'])} lines changed, {ok} read back correctly, {verdict}", flush=True)
 
 
 if __name__ == "__main__":
