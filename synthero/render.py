@@ -9,79 +9,25 @@ so repeated edits on one page cannot degrade it.
 
 from __future__ import annotations
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from dataclasses import dataclass
 
-from synthero.geometry import Box, gray_values, paper_level, pixels
+from PIL import Image, ImageDraw, ImageFilter
 
-Font = ImageFont.FreeTypeFont
+from synthero import fonts
+from synthero.geometry import Box, paper_level, pixels
+
 RGB = tuple[int, int, int]
-
-FONTS = {
-    # Liberation Sans has Arial's widths and Liberation Mono has Courier's, the
-    # usual fonts of printed invoices and till receipts.
-    (False, False): "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-    (True, False): "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-    (False, True): "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
-    (True, True): "/usr/share/fonts/truetype/liberation/LiberationMono-Bold.ttf",
-}
-
-
-def _ink_density(img: Image.Image, cut: int) -> float:
-    data = gray_values(img)
-    return sum(1 for p in data if p < cut) / max(1, len(data))
 
 
 def _ink_colour(img: Image.Image, cut: int) -> RGB:
-    """Mean colour of the darker half of the ink pixels: the printed colour, not its anti-aliased rim."""
+    """Mean colour of the darkest third of the ink pixels: the printed colour, not its anti-aliased rim."""
     raw = img.convert("RGB").tobytes()
     ink = sorted((px for px in zip(raw[0::3], raw[1::3], raw[2::3], strict=True) if sum(px) / 3 < cut), key=sum)
-    darkest = ink[: max(1, len(ink) // 2)]
+    darkest = ink[: max(1, len(ink) // 3)]
     if not darkest:
         return (15, 15, 15)
     r, g, b = (int(sum(c) / len(darkest)) for c in zip(*darkest, strict=True))
     return (r, g, b)
-
-
-def _render(text: str, font: Font, size: tuple[int, int]) -> Image.Image:
-    x1, y1, _, y2 = font.getbbox(text)
-    img = Image.new("RGB", size, "white")
-    ImageDraw.Draw(img).text((-x1, (size[1] - (y2 - y1)) // 2 - y1), text, font=font, fill="black")
-    return img
-
-
-def _font_for_width(path: str, text: str, target_w: int, max_h: int) -> Font:
-    """Largest font size at which `text` is at most `target_w` wide and its capitals at most `max_h` tall."""
-    for size in range(max(8, max_h * 3), 5, -1):
-        f = ImageFont.truetype(path, size)
-        x1, _, x2, _ = f.getbbox(text)
-        _, t, _, b = f.getbbox("H")
-        if x2 - x1 <= target_w * 1.02 and b - t <= max_h:
-            return f
-    return ImageFont.truetype(path, 6)
-
-
-def _match_style(original: Image.Image, old: str, ink_h: int, cut: int) -> tuple[Font, float]:
-    """Render the OLD value in each font and keep the one closest to the original pixels.
-
-    Returns the font and its width correction, which is applied to the new value too, so
-    a value of the same length takes the same space. Width is robust against "@",
-    descenders, and umlauts; ink density tells regular from bold.
-    """
-    orig_w = max(1, original.width)
-    target = _ink_density(original, cut)
-    best: tuple[float, Font, float] | None = None
-    for bold in (False, True):
-        for mono in (False, True):
-            f = _font_for_width(FONTS[(bold, mono)], old, orig_w, ink_h + 1)
-            x1, _, x2, _ = f.getbbox(old)
-            ow = max(1, int(x2 - x1))
-            score = abs(ow - orig_w) / orig_w + 2 * abs(_ink_density(_render(old, f, (ow, ink_h + 2)), 128) - target)
-            if mono:  # monospace only when it fits clearly better than the normal font
-                score *= 1.6
-            if best is None or score < best[0]:
-                best = (score, f, orig_w / ow)
-    assert best is not None
-    return best[1], best[2]
 
 
 def _free_right(gray: Image.Image, box: Box, cut: int, gap: int = 1, limit: int = 400) -> int:
@@ -125,6 +71,28 @@ def _value_rows(gray: Image.Image, x1: int, x2: int, y1: int, y2: int, cut: int)
     return (rows[0], rows[-1] + 1) if rows else (y1, y2)
 
 
+@dataclass(frozen=True)
+class Measure:
+    """The original value's ink: its box (the run's own rows), the ink cut, and the paper level."""
+
+    value_box: Box
+    cut: int
+    paper: int
+
+    @property
+    def ink_h(self) -> int:
+        return self.value_box[3] - self.value_box[1]
+
+
+def measure(source: Image.Image, line_box: Box, run_box: Box) -> Measure:
+    gray = source.convert("L")
+    lx1, ly1, lx2, ly2 = line_box
+    local = gray.crop((max(0, lx1 - 20), max(0, ly1 - 10), min(gray.width, lx2 + 20), min(gray.height, ly2 + 10)))
+    paper = paper_level(local)
+    ty1, ty2 = _value_rows(gray, run_box[0], run_box[2], ly1, ly2, paper - 70)
+    return Measure((run_box[0], ty1, run_box[2], ty2), paper - 70, paper)
+
+
 def replace_words(
     dest: Image.Image,
     source: Image.Image,
@@ -133,27 +101,24 @@ def replace_words(
     old: str,
     new: str,
     next_x: int | None = None,
+    style: fonts.Style | None = None,
     pad: int = 6,
 ) -> tuple[Image.Image, Box]:
     """Redraw the words in `run_box` (inside the line `line_box`) as `new`.
 
     `dest` is the page so far, `source` the original scan, which all measurements use.
-    `next_x` is where the next kept word on the line starts. Returns the new page and
-    the area to read back.
+    `next_x` is where the next kept word on the line starts, and `style` the page's font
+    family and weight (`fonts.page_style`). Returns the new page and the area to read back.
     """
     gray = source.convert("L")
     lx1, ly1, lx2, ly2 = line_box
-    vx1, vx2 = run_box[0], run_box[2]
-    local = gray.crop((max(0, lx1 - 20), max(0, ly1 - 10), min(gray.width, lx2 + 20), min(gray.height, ly2 + 10)))
-    paper_v = paper_level(local)
-    cut = paper_v - 70
-    paper: RGB = (paper_v, paper_v, paper_v)
-    ty1, ty2 = _value_rows(gray, vx1, vx2, ly1, ly2, cut)
-    ink_h = ty2 - ty1
-    value_box = (vx1, ty1, vx2, ty2)
+    m = measure(source, line_box, run_box)
+    vx1, ty1, vx2, ty2 = value_box = m.value_box
+    cut, ink_h = m.cut, m.ink_h
+    paper: RGB = (m.paper, m.paper, m.paper)
     original = source.crop(value_box)
     ink = _ink_colour(original, cut)
-    font, width_scale = _match_style(original, old, ink_h, cut)
+    font, width_scale = fonts.best(original, old, ink_h, style)
 
     # Free space to the right (next word or cell line) and above/below (neighbouring lines).
     right = next_x - 4 if next_x is not None else _free_right(gray, value_box, cut)
@@ -182,7 +147,7 @@ def replace_words(
     text_mask = Image.new("L", (w, h), 0)
     text_mask.paste(canvas, (vx1 - area[0], 0))
     patch.paste(Image.new("RGB", (w, h), ink), (0, 0), text_mask)
-    patch = patch.filter(ImageFilter.GaussianBlur(0.5))
+    patch = patch.filter(ImageFilter.GaussianBlur(0.35))
     mask = Image.new("L", (w, h), 0)
     # Solid over the old ink, soft only at the outer edge, which is blank paper.
     ImageDraw.Draw(mask).rectangle((2, 0 if pad_top < 3 else 2, w - 3, h - 1 if pad_bottom < 3 else h - 3), fill=255)

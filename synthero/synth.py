@@ -14,10 +14,10 @@ from typing import NotRequired, TypedDict
 
 from PIL import Image
 
-from synthero import barcode, geometry, leak, match, render, values
+from synthero import barcode, fonts, geometry, leak, match, render, values
 from synthero.detect import Value
 from synthero.geometry import Box
-from synthero.locate import Located, Reader
+from synthero.locate import Located, Reader, overlaps
 
 PageReader = Callable[[Image.Image], str]
 
@@ -46,10 +46,16 @@ class LeakVerdict(TypedDict):
     leaked_types: list[str]
 
 
+class PageKey(TypedDict):
+    page: int
+    changes: list[Change]
+    barcodes_scrambled: int  # other barcodes, whose content is unknown, redrawn to encode nothing
+    leak_check: NotRequired[LeakVerdict]
+
+
 class Key(TypedDict):
     seed: int
-    changes: list[Change]
-    leak_check: NotRequired[LeakVerdict]
+    pages: list[PageKey]
 
 
 class PrivateChange(TypedDict):
@@ -60,15 +66,30 @@ class PrivateChange(TypedDict):
     located: bool
 
 
-class PrivateKey(TypedDict):
-    seed: int
+class PrivatePage(TypedDict):
+    page: int
     changes: list[PrivateChange]
     leaks: NotRequired[list[leak.Leak]]
 
 
+class PrivateKey(TypedDict):
+    seed: int
+    pages: list[PrivatePage]
+
+
+@dataclass(frozen=True)
+class Analysed:
+    """One page: its image, the values found on it, where each is printed, and its other text."""
+
+    image: Image.Image
+    values: list[Value]
+    locs: list[list[Located]]
+    context: str
+
+
 @dataclass(frozen=True)
 class Copy:
-    image: Image.Image
+    images: list[Image.Image]
     key: Key
     private_key: PrivateKey
 
@@ -96,17 +117,56 @@ def _redraw_barcode(out: Image.Image, scan: Image.Image, run: Box, new: str) -> 
     bars = barcode.find_bars(gray, region, h)
     if bars is None:
         return None
+    # The bars never cover the number printed above or below them.
+    above = (bars[1] + bars[3]) / 2 < (run[1] + run[3]) / 2
+    top, bottom = (bars[1], min(bars[3], run[1] - 1)) if above else (max(bars[1], run[3] + 1), bars[3])
+    if bottom - top < h:
+        return None
+    bars = (bars[0], top, bars[2], bottom)
     paper = geometry.paper_level(gray.crop(region))
     valid = barcode.draw(out, bars, digits, (20, 20, 20), (paper, paper, paper))
     return list(bars), valid
 
 
+def page_style(scan: Image.Image, locs: list[list[Located]]) -> fonts.Style | None:
+    """The font family and weight of the page's values, voted by all of them."""
+    samples = []
+    for loc in (p for places in locs for p in places):
+        m = render.measure(scan, loc.line_box, loc.run_box)
+        samples.append((scan.crop(m.value_box), loc.printed, m.ink_h))
+    return fonts.page_style(samples) if samples else None
+
+
+def scramble_barcodes(
+    out: Image.Image, scan: Image.Image, locs: list[list[Located]], redrawn: list[list[int]], seed: int
+) -> int:
+    """Redraw every other barcode on the page as bars that encode nothing.
+
+    A barcode that was not redrawn for a changed number may still encode personal data
+    (an invoice or customer number), and a scan rarely resolves it well enough to tell.
+    """
+    heights = sorted(p.run_box[3] - p.run_box[1] for places in locs for p in places)
+    line_h = heights[len(heights) // 2] if heights else 12
+    gray = scan.convert("L")
+    done = [(b[0], b[1], b[2], b[3]) for b in redrawn]
+    count = 0
+    for bars in barcode.find_all(gray, line_h):
+        if any(overlaps(bars, d) for d in done):
+            continue
+        paper = geometry.paper_level(gray.crop(bars))
+        x0, y0, x1, _ = bars
+        widths = barcode.pattern_widths(f"{seed}:{x0}:{y0}", x1 - x0)
+        barcode.draw_widths(out, bars, widths, (20, 20, 20), (paper, paper, paper))
+        count += 1
+    return count
+
+
 def _edit_value(
-    out: Image.Image, scan: Image.Image, new: str, places: list[Located], read: Reader | None
+    out: Image.Image, scan: Image.Image, new: str, places: list[Located], read: Reader | None, style: fonts.Style | None
 ) -> tuple[Image.Image, list[Place]]:
     done: list[Place] = []
     for loc in places:
-        out, area = render.replace_words(out, scan, loc.line_box, loc.run_box, loc.printed, new, loc.next_x)
+        out, area = render.replace_words(out, scan, loc.line_box, loc.run_box, loc.printed, new, loc.next_x, style)
         place: Place = {"box": list(loc.run_box)}
         if read is not None:
             place["read_back_ok"] = match.contains(read(out.crop(area)), new)
@@ -118,45 +178,61 @@ def _edit_value(
 
 
 def make_copy(
-    scan: Image.Image,
-    vals: list[Value],
-    locs: list[list[Located]],
+    pages: list[Analysed],
     seed: int,
-    context: str,
     read: Reader | None = None,
     read_page: PageReader | None = None,
 ) -> Copy:
-    """Replace every located value with a consistent invented one.
+    """One synthetic copy of a document: every located value replaced with a consistent invented one.
 
-    `read` reads back each edit (None: no read-back). `read_page` reads the whole
-    finished page for the leak check (None: no leak check), which searches for every
-    detected value, located or not. `context` is the page's text without the values.
+    One replacer serves all pages, so a person, number, or date shift is the same on every
+    page. `read` reads back each edit (None: no read-back). `read_page` reads each finished
+    page for the leak check (None: no leak check), which searches for every detected value,
+    located or not.
     """
     repl = values.Replacer(random.Random(seed))
+    done = [_copy_page(page, n, repl, seed, read, read_page) for n, page in enumerate(pages, start=1)]
+    key: Key = {"seed": seed, "pages": [d[1] for d in done]}
+    private_key: PrivateKey = {"seed": seed, "pages": [d[2] for d in done]}
+    return Copy([d[0] for d in done], key, private_key)
+
+
+def _copy_page(
+    page: Analysed,
+    n: int,
+    repl: values.Replacer,
+    seed: int,
+    read: Reader | None,
+    read_page: PageReader | None,
+) -> tuple[Image.Image, PageKey, PrivatePage]:
+    scan, vals, locs = page.image, page.values, page.locs
     out = scan.convert("RGB").copy()
+    style = page_style(scan, locs)
     public: list[Change] = []
     private: list[PrivateChange] = []
     for v, places in zip(vals, locs, strict=True):
         old = printed_text(v, places)
         new = repl.replace(old, v.type, v.owner)
-        done: list[Place] = []
+        edits: list[Place] = []
         if new != old:
-            out, done = _edit_value(out, scan, new, places, read)
-        ok = bool(done) and all(p.get("read_back_ok", True) for p in done)
+            out, edits = _edit_value(out, scan, new, places, read, style)
+        ok = bool(edits) and all(p.get("read_back_ok", True) for p in edits)
         public.append(
-            {"type": v.type, "owner": v.owner, "new": new, "located": bool(places), "places": done, "read_back_ok": ok}
+            {"type": v.type, "owner": v.owner, "new": new, "located": bool(places), "places": edits, "read_back_ok": ok}
         )
         private.append({"type": v.type, "owner": v.owner, "old": old, "new": new, "located": bool(places)})
-    key: Key = {"seed": seed, "changes": public}
-    private_key: PrivateKey = {"seed": seed, "changes": private}
+    redrawn = [p["barcode"] for c in public for p in c["places"] if "barcode" in p]
+    scrambled = scramble_barcodes(out, scan, locs, redrawn, seed)
+    key: PageKey = {"page": n, "changes": public, "barcodes_scrambled": scrambled}
+    private_page: PrivatePage = {"page": n, "changes": private}
     if read_page is not None:
         olds = sorted(
             {(v.type, t) for v, ps in zip(vals, locs, strict=True) for t in [v.text] + [p.printed for p in ps]}
         )
-        leaks = leak.check(read_page(out), olds, context, [c["new"] for c in private])
+        leaks = leak.check(read_page(out), olds, page.context, [c["new"] for c in private])
         key["leak_check"] = {"passed": not leaks, "leaked_types": sorted({x["type"] for x in leaks})}
-        private_key["leaks"] = leaks
-    return Copy(out, key, private_key)
+        private_page["leaks"] = leaks
+    return out, key, private_page
 
 
 def page_context(ocr_text: str, vals: list[Value], locs: list[list[Located]]) -> str:

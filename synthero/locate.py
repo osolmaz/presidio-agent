@@ -83,9 +83,13 @@ def _band(page: Page, run: Box, text: str) -> Box | None:
 
 
 def _snap(page: Page, run: Box, line: Box) -> Box:
-    """Grow an OCR run to the whole ink words it touches, so a number OCR read only in part
-    is still erased completely."""
-    touched = [w for w in geometry.word_boxes(page.gray, line, page.rule_px) if w[0] < run[2] and w[2] > run[0]]
+    """Grow an OCR run to the whole ink words that lie mostly inside it, so a number OCR read
+    only in part is still erased completely, but a label beside it keeps its pixels."""
+    touched = [
+        w
+        for w in geometry.word_boxes(page.gray, line, page.rule_px)
+        if min(w[2], run[2]) - max(w[0], run[0]) >= 0.5 * (w[2] - w[0])
+    ]
     return _union([run, *touched]) if touched else run
 
 

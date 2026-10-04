@@ -399,3 +399,20 @@ def test_pattern_widths_shape():
         widths = barcode.pattern_widths("4827", n)
         assert sum(widths) == n and len(widths) % 2 == 1 and all(w >= 1 for w in widths)
     assert max(barcode.pattern_widths("4827", 400)) <= 4 + 4
+
+
+def test_pieces_by_type():
+    assert leak.pieces("3.450 Bits", "id") == {"3450BITS", "3450"}  # the whole value, and its digits
+    assert leak.pieces("leon.hartmann@web-shop.de", "email") == {"LEONHARTMANN", "LEON", "HARTMANN"}
+    assert leak.pieces("HRB 789012 B", "id") == {"HRB789012B", "789012"}
+    assert leak.pieces("Leon Hartmann", "person") == {"LEONHARTMANN", "LEON", "HARTMANN"}
+
+
+def test_amounts_are_never_values():
+    for amount in ("146,50 EUR", "3.450 Bits", "18,50", "1.234,56 €", "152 Bits"):
+        assert detect.is_amount(amount), amount
+    for not_amount in ("60120873", "12.07.2026", "HRB 789012 B", "00 075 00", "DE312456789", "19:10 Uhr"):
+        assert not detect.is_amount(not_amount), not_amount
+    hint = (0, 0, 1, 1)
+    values = [Value("146,50 EUR", "id", "d", hint), Value("146,50", "card", "d", hint), Value("1357", "id", "d", hint)]
+    assert detect.normalise(values) == [Value("1357", "id", "d", hint)]

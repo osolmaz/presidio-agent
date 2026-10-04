@@ -1,16 +1,21 @@
-"""Make synthetic copies of a scanned document with new personal data.
+"""Make synthetic copies of a scanned or digital document with new personal data.
 
-    synthero SCAN.png [--n 3] [--out /dev/shm/synthero/out] [--seed 1]
+    synthero DOCUMENT [--n 3] [--out /dev/shm/synthero/out] [--seed 1]
 
-1. Tesseract gives word positions; its text is never trusted as a value.
-2. The model reads the personal values from the image (type, owner, rough box).
-3. Each value is located: OCR words that match it, else pixel lines read back.
-4. Each copy replaces located values with consistent invented ones, redrawing only
-   their words; it is read back, and the whole page is checked for any surviving
-   original value. Values that could not be located make the copy fail that check.
+DOCUMENT is an image or a PDF (scanned pages, text pages, or both).
 
-Outputs (in --out): copy-N.png and copy-N.json, the public answer key with new
-values only. The analysis and the old-to-new mappings go to --private, which must
+1. Each page is an image with word boxes: from Tesseract for a scan, from the text
+   layer for a digital PDF page. OCR text is never trusted as a value.
+2. The model reads the personal values from the page image (type, owner, rough box).
+3. Each value is located: OCR words that match it, a corrected reading, or pixel lines.
+4. Each copy replaces located values with consistent invented ones across all pages,
+   redrawing only their words; barcodes are redrawn; each edit is read back, and each
+   page is checked for any surviving original value. A value that could not be
+   located fails that check.
+
+Outputs (in --out): STEM.pN.original.png and STEM.pN.boxes.png per page, and per copy
+STEM.copy-K.pN.png, STEM.copy-K.pdf, and STEM.copy-K.json, the public answer key with
+new values only. The analysis and the old-to-new mappings go to --private, which must
 never be served or shared.
 """
 
@@ -22,8 +27,7 @@ import os
 
 from PIL import Image, ImageDraw
 
-from synthero import detect, locate, ocr, synth, vl
-from synthero.detect import Value
+from synthero import detect, locate, source, synth, vl
 from synthero.locate import Located
 
 # Red: OCR words matched the value. Purple: OCR and a second reading agreed on a
@@ -36,15 +40,17 @@ def _save(path: str, data: object) -> None:
         json.dump(data, f, indent=1, ensure_ascii=False)
 
 
-def analyse(scan: Image.Image, ocr_lines: list[ocr.Line], cache: str) -> tuple[list[Value], list[list[Located]]]:
-    """Detected values and every place each is printed. Cached per scan in the private folder."""
+def analyse(page: source.Page, cache: str) -> synth.Analysed:
+    """The values on a page and every place each is printed. Cached per page in the private folder."""
     if os.path.exists(cache):
         with open(cache, encoding="utf-8") as f:
-            return synth.analysis_from_json(json.load(f))
-    vals = detect.find_values(scan, "\n".join(ln.text for ln in ocr_lines))
-    locs = locate.locate(scan, vals, ocr_lines, vl.read_text)
-    _save(cache, synth.analysis_to_json(vals, locs))
-    return vals, locs
+            vals, locs = synth.analysis_from_json(json.load(f))
+    else:
+        vals = detect.find_values(page.image, "\n".join(ln.text for ln in page.lines))
+        locs = locate.locate(page.image, vals, page.lines, vl.read_text)
+        _save(cache, synth.analysis_to_json(vals, locs))
+    context = synth.page_context(" ".join(ln.text for ln in page.lines), vals, locs)
+    return synth.Analysed(page.image, vals, locs, context)
 
 
 def debug_boxes(scan: Image.Image, locs: list[list[Located]], path: str) -> None:
@@ -57,18 +63,22 @@ def debug_boxes(scan: Image.Image, locs: list[list[Located]], path: str) -> None
 
 
 def summary(i: int, key: synth.Key) -> str:
-    edited = [c for c in key["changes"] if c["places"]]
+    changes = [c for p in key["pages"] for c in p["changes"]]
+    edited = [c for c in changes if c["places"]]
     ok = sum(c["read_back_ok"] for c in edited)
-    lc = key.get("leak_check")
-    verdict = "" if lc is None else ("leak check passed" if lc["passed"] else f"LEAK of {lc['leaked_types']}")
-    return f"copy {i}: {len(edited)} values replaced, {ok} read back correctly, {verdict}"
+    checks = [p["leak_check"] for p in key["pages"] if "leak_check" in p]
+    leaked = sorted({t for lc in checks for t in lc["leaked_types"]})
+    verdict = "" if not checks else ("leak check passed" if not leaked else f"LEAK of {leaked}")
+    bars = sum(p["barcodes_scrambled"] for p in key["pages"])
+    return f"copy {i}: {len(edited)} values replaced, {ok} read back correctly, {bars} barcodes scrambled, {verdict}"
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
-    ap.add_argument("scan")
+    ap.add_argument("document", help="an image or a PDF")
     ap.add_argument("--n", type=int, default=3)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--dpi", type=int, default=150, help="resolution for digital PDF pages")
     ap.add_argument("--out", default="/dev/shm/synthero/out")
     ap.add_argument(
         "--private",
@@ -81,34 +91,34 @@ def main() -> None:
 
     os.makedirs(a.out, exist_ok=True)
     os.makedirs(a.private, exist_ok=True)
-    scan = Image.open(a.scan).convert("RGB")
-    stem = os.path.splitext(os.path.basename(a.scan))[0]
-    ocr_lines = ocr.lines(scan)
-    vals, locs = analyse(scan, ocr_lines, os.path.join(a.private, f"{stem}.analysis.json"))
-    debug_boxes(scan, locs, os.path.join(a.out, f"{stem}.boxes.png"))
-    scan.save(os.path.join(a.out, f"{stem}.original.png"))
-    places = [p for ps in locs for p in ps]
-    by_ocr = sum(1 for p in places if p.how != "pixels")
-    print(
-        f"{len(vals)} personal values, {sum(1 for ps in locs if ps)} located in {len(places)} places "
-        f"({by_ocr} by OCR, {len(places) - by_ocr} by pixels)",
-        flush=True,
-    )
-    context = synth.page_context(" ".join(ln.text for ln in ocr_lines), vals, locs)
+    stem = os.path.splitext(os.path.basename(a.document))[0]
+    pages = []
+    for n, page in enumerate(source.load(a.document, a.dpi), start=1):
+        analysed = analyse(page, os.path.join(a.private, f"{stem}.p{n}.analysis.json"))
+        page.image.save(os.path.join(a.out, f"{stem}.p{n}.original.png"))
+        debug_boxes(page.image, analysed.locs, os.path.join(a.out, f"{stem}.p{n}.boxes.png"))
+        places = [p for ps in analysed.locs for p in ps]
+        by_ocr = sum(1 for p in places if p.how != "pixels")
+        print(
+            f"page {n} ({page.kind}): {len(analysed.values)} personal values, "
+            f"{sum(1 for ps in analysed.locs if ps)} located in {len(places)} places "
+            f"({by_ocr} by OCR, {len(places) - by_ocr} by pixels)",
+            flush=True,
+        )
+        pages.append(analysed)
     for i in range(a.n):
         copy = synth.make_copy(
-            scan,
-            vals,
-            locs,
+            pages,
             a.seed + i,
-            context,
             read=None if a.no_verify else vl.read_text,
             read_page=None if a.no_leak_check else vl.read_page,
         )
-        base = f"{stem}.copy-{i + 1}"
-        copy.image.save(os.path.join(a.out, base + ".png"))
-        _save(os.path.join(a.out, base + ".json"), copy.key)
-        _save(os.path.join(a.private, base + ".private.json"), copy.private_key)
+        base = os.path.join(a.out, f"{stem}.copy-{i + 1}")
+        for n, image in enumerate(copy.images, start=1):
+            image.save(f"{base}.p{n}.png")
+        copy.images[0].save(f"{base}.pdf", save_all=True, append_images=copy.images[1:])
+        _save(f"{base}.json", copy.key)
+        _save(os.path.join(a.private, f"{stem}.copy-{i + 1}.private.json"), copy.private_key)
         print(summary(i + 1, copy.key), flush=True)
 
 

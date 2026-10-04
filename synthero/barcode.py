@@ -209,7 +209,9 @@ def find_bars(gray: Image.Image, region: Box, line_height: int, min_runs: int = 
     tall = [(y0 + a, y0 + b) for a, b in bands(busy) if b - a >= 2 * line_height]
     if not tall:
         return None
-    top, bottom = max(tall, key=lambda band: band[1] - band[0])
+    top, bottom = _bar_rows(gray, x0, x1, *max(tall, key=lambda band: band[1] - band[0]))
+    if bottom - top < 2 * line_height:
+        return None
     above, below = max(0, top - 6), min(gray.height - 1, bottom + 5)
     cols = [
         x
@@ -217,6 +219,63 @@ def find_bars(gray: Image.Image, region: Box, line_height: int, min_runs: int = 
         if any(px[x, y] < cut for y in range(top, bottom)) and not (px[x, above] < cut and px[x, below] < cut)
     ]
     return (cols[0], top, cols[-1] + 1, bottom) if cols else None
+
+
+def _bar_rows(gray: Image.Image, x0: int, x1: int, top: int, bottom: int) -> tuple[int, int]:
+    """The rows around the band's middle that repeat its pattern: bars, without the digits under them."""
+    px = pixels(gray)
+    cut = ink_threshold(gray)
+    mid = [px[x, (top + bottom) // 2] < cut for x in range(x0, x1)]
+
+    def same(y: int) -> bool:
+        row = [px[x, y] < cut for x in range(x0, x1)]
+        return sum(a == b for a, b in zip(row, mid, strict=True)) >= 0.85 * len(mid)
+
+    t, b = (top + bottom) // 2, (top + bottom) // 2
+    while t > top and same(t - 1):
+        t -= 1
+    while b < bottom - 1 and same(b + 1):
+        b += 1
+    return t, b + 1
+
+
+def is_barcode(gray: Image.Image, box: Box, min_share: float = 0.85) -> bool:
+    """Bars run from top to bottom: nearly every column is either ink or paper all the way down.
+
+    Letters, logos, and stamps change along a column, so they fail.
+    """
+    x0, y0, x1, y1 = box
+    px = pixels(gray)
+    cut = ink_threshold(gray)
+    height = max(1, y1 - y0)
+    uniform = 0
+    for x in range(x0, x1):
+        share = sum(1 for y in range(y0, y1) if px[x, y] < cut) / height
+        uniform += share >= 0.85 or share <= 0.15
+    return uniform >= min_share * max(1, x1 - x0)
+
+
+def find_all(gray: Image.Image, line_height: int, min_runs: int = 20) -> list[Box]:
+    """Every barcode on the page: blocks at least two lines tall where many bars sit side by side.
+
+    Rows are first grouped into tall busy bands; within a band, blocks of bars are split
+    at blank gaps wider than three lines (two barcodes on the same rows).
+    """
+    px = pixels(gray)
+    cut = ink_threshold(gray)
+    busy = [len(runs([px[x, y] < cut for x in range(gray.width)])) >= min_runs for y in range(gray.height)]
+    found: list[Box] = []
+    for top, bottom in bands(busy):
+        if bottom - top < 2 * line_height:
+            continue
+        mid = (top + bottom) // 2
+        cols = [px[x, mid] < cut for x in range(gray.width)]
+        for left, right in bands(cols, min_gap=3 * line_height):
+            if len(runs(cols[left:right])) >= min_runs:
+                block = find_bars(gray, (left, top, right, bottom), line_height, min_runs)
+                if block is not None and is_barcode(gray, block):
+                    found.append(block)
+    return found
 
 
 def pattern_widths(digits: str, modules: int) -> list[int]:
@@ -243,11 +302,18 @@ def draw(img: Image.Image, bars: Box, digits: str, ink: tuple[int, int, int], pa
     Returns True when the bars are a valid Code 128 of `digits`, False when that does not
     fit (modules under one pixel) and a pattern that encodes nothing was drawn instead.
     """
-    x0, y0, x1, y1 = bars
+    x0, _, x1, _ = bars
     widths = widths_for(digits)
     valid = (x1 - x0) >= sum(widths)
-    if not valid:
-        widths = pattern_widths(digits, x1 - x0)
+    draw_widths(img, bars, widths if valid else pattern_widths(digits, x1 - x0), ink, paper)
+    return valid
+
+
+def draw_widths(
+    img: Image.Image, bars: Box, widths: list[int], ink: tuple[int, int, int], paper: tuple[int, int, int]
+) -> None:
+    """Paint over `bars` and draw bars of these module widths (bar first) across the same width."""
+    x0, y0, x1, y1 = bars
     module = (x1 - x0) / sum(widths)
     d = ImageDraw.Draw(img)
     d.rectangle((x0, y0, x1 - 1, y1 - 1), fill=paper)
@@ -257,4 +323,3 @@ def draw(img: Image.Image, bars: Box, digits: str, ink: tuple[int, int, int], pa
             left, right = x0 + round(pos * module), x0 + round((pos + w) * module) - 1
             d.rectangle((left, y0, max(left, right), y1 - 1), fill=ink)
         pos += w
-    return valid

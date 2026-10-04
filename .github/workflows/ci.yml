@@ -14,8 +14,8 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v7
-      - name: Fonts used to redraw values
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation
+      - name: Fonts used to redraw values, and poppler for PDFs
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation fonts-dejavu-core poppler-utils
       - run: python -m pip install -e ".[dev]"
       - run: ruff format --check .
       - run: ruff check .

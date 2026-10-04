@@ -23,10 +23,21 @@ def norm(s: str) -> str:
     return re.sub(r"[^0-9A-ZÄÖÜß]", "", s.upper())
 
 
-def pieces(old_value: str) -> set[str]:
-    """The parts of an old value that would identify it if they reappeared."""
+NUMBER_TYPES = {"id", "card", "iban", "phone", "date", "time"}
+
+
+def pieces(old_value: str, type_: str = "person") -> set[str]:
+    """The parts of an old value that would identify it if they reappeared.
+
+    Names and places are identified by their words, numbers by their digit runs (a
+    unit such as "Bits" next to a number identifies nothing), and an e-mail by its local
+    part: the domain can be the business's own, and a name in it is checked as the name.
+    """
+    if type_ == "email":
+        old_value = old_value.partition("@")[0]
     out = {norm(old_value)}
-    out.update(norm(t) for t in re.findall(r"[A-Za-zÄÖÜäöüß]{4,}", old_value))
+    if type_ not in NUMBER_TYPES:
+        out.update(norm(t) for t in re.findall(r"[A-Za-zÄÖÜäöüß]{4,}", old_value))
     out.update(re.findall(r"\d{4,}", re.sub(r"[.\- ]", "", old_value)))
     return {p for p in out if len(p) >= 4}
 
@@ -47,7 +58,9 @@ def check(
     leaks: list[Leak] = []
     for type_, old in old_values:
         excusable = type_ in PLACE_TYPES
-        found = sorted(p for p in pieces(old) if p in page and p not in new_text and not (excusable and p in shared))
+        found = sorted(
+            p for p in pieces(old, type_) if p in page and p not in new_text and not (excusable and p in shared)
+        )
         if found:
             leaks.append({"type": type_, "pieces": found})
     return leaks

@@ -163,29 +163,40 @@ def test_make_copy_edits_every_place_and_keeps_old_values_out_of_the_public_key(
         places.append(locate.Located(value, line, run, None, "ocr", "60120873"))
     new = values.Replacer(random.Random(1)).replace("60120873", "id", "customer")
     copy = synth.make_copy(
-        img,
-        [value],
-        [places],
+        [synth.Analysed(img, [value], [places], "Kd-Nr.: Ref")],
         seed=1,
-        context="Kd-Nr.: Ref",
         read=lambda crop: f"Ref {new}",
         read_page=lambda page: f"Kd-Nr.: {new} Ref {new}",
     )
-    change = copy.key["changes"][0]
+    change = copy.key["pages"][0]["changes"][0]
     assert change["new"] == new and len(change["places"]) == 2 and change["read_back_ok"]
-    assert copy.key["leak_check"] == {"passed": True, "leaked_types": []}
+    assert copy.key["pages"][0]["leak_check"] == {"passed": True, "leaked_types": []}
     assert "60120873" not in json.dumps(copy.key)
-    assert copy.private_key["changes"][0]["old"] == "60120873"
+    assert copy.private_key["pages"][0]["changes"][0]["old"] == "60120873"
     for p in places:
-        assert copy.image.crop(p.run_box).tobytes() != img.crop(p.run_box).tobytes()
+        assert copy.images[0].crop(p.run_box).tobytes() != img.crop(p.run_box).tobytes()
 
 
 def test_make_copy_fails_the_leak_check_for_a_value_it_could_not_locate():
     img = page([(20, 20, "LEON HARTMANN")])
     value = Value("LEON HARTMANN", "person", "customer", (0, 0, 600, 300))
-    copy = synth.make_copy(img, [value], [[]], seed=1, context="", read_page=lambda page: "LEON HARTMANN")
-    assert copy.key["changes"][0]["located"] is False
-    assert copy.key["leak_check"] == {"passed": False, "leaked_types": ["person"]}
+    pages = [synth.Analysed(img, [value], [[]], "")]
+    copy = synth.make_copy(pages, seed=1, read_page=lambda page: "LEON HARTMANN")
+    assert copy.key["pages"][0]["changes"][0]["located"] is False
+    assert copy.key["pages"][0]["leak_check"] == {"passed": False, "leaked_types": ["person"]}
+
+
+def test_one_document_gets_one_identity_across_pages():
+    img = page([(20, 20, "LEON HARTMANN")])
+    gray = img.convert("L")
+    line = geometry.ink_lines(gray)[0]
+    value = Value("LEON HARTMANN", "person", "customer", (0, 0, 600, 300))
+    loc = locate.Located(value, line, line, None, "ocr", "LEON HARTMANN")
+    pages = [synth.Analysed(img, [value], [[loc]], ""), synth.Analysed(img, [value], [[loc]], "")]
+    copy = synth.make_copy(pages, seed=4)
+    first, second = (p["changes"][0]["new"] for p in copy.key["pages"])
+    assert first == second and [p["page"] for p in copy.key["pages"]] == [1, 2]
+    assert len(copy.images) == 2
 
 
 def test_analysis_cache_round_trips_and_rejects_garbage():
@@ -254,25 +265,32 @@ def test_parse_objects_salvages_a_cut_off_answer():
 
 def test_page_shows_new_values_only(tmp_path):
     page_img = Image.new("RGB", (10, 10), "white")
-    page_img.save(tmp_path / "scan.original.png")
-    page_img.save(tmp_path / "scan.copy-1.png")
+    page_img.save(tmp_path / "scan.p1.original.png")
+    page_img.save(tmp_path / "scan.copy-1.p1.png")
     key = {
         "seed": 1,
-        "changes": [
+        "pages": [
             {
-                "type": "person",
-                "owner": "customer",
-                "new": "MIRA VOGT",
-                "located": True,
-                "read_back_ok": True,
-                "places": [{}],
+                "page": 1,
+                "barcodes_scrambled": 1,
+                "changes": [
+                    {
+                        "type": "person",
+                        "owner": "customer",
+                        "new": "MIRA VOGT",
+                        "located": True,
+                        "read_back_ok": True,
+                        "places": [{}],
+                    }
+                ],
+                "leak_check": {"passed": True, "leaked_types": []},
             }
         ],
-        "leak_check": {"passed": True, "leaked_types": []},
     }
     (tmp_path / "scan.copy-1.json").write_text(json.dumps(key))
     html_text = Path(synthero_page.build(str(tmp_path))).read_text(encoding="utf-8")
-    assert "MIRA VOGT" in html_text and "Leak check passed" in html_text
+    assert "MIRA VOGT" in html_text and "Leak check passed" in html_text and "1 barcodes scrambled" in html_text
+    assert "scan.copy-1.p1.png" in html_text
 
 
 # --- cli -----------------------------------------------------------------
@@ -304,12 +322,12 @@ def test_cli_end_to_end_with_fake_model_and_ocr(tmp_path, monkeypatch, capsys):
     cli.main()
     cli.main()  # the second run reads the cached analysis
     printed = capsys.readouterr().out
-    assert "2 personal values, 2 located in 2 places (2 by OCR, 0 by pixels)" in printed
-    assert "copy 2: 2 values replaced, 0 read back correctly, leak check passed" in printed
+    assert "page 1 (scan): 2 personal values, 2 located in 2 places (2 by OCR, 0 by pixels)" in printed
+    assert "copy 2: 2 values replaced, 0 read back correctly, 0 barcodes scrambled, leak check passed" in printed
     public = (out / "scan.copy-1.json").read_text(encoding="utf-8")
     assert "HARTMANN" not in public and "60120873" not in public
     assert "HARTMANN" in (private / "scan.copy-1.private.json").read_text(encoding="utf-8")
-    assert (out / "scan.boxes.png").exists()
+    assert (out / "scan.p1.boxes.png").exists() and (out / "scan.copy-2.pdf").exists()
 
 
 def test_ocr_near_miss_takes_the_printed_text_from_a_second_reading():
@@ -349,13 +367,13 @@ def test_make_copy_uses_the_printed_text_and_redraws_the_barcode():
     run = geometry.ink_lines(gray, (0, 85, 520, 140))[0]
     value = Value("842607130031480B42", "id", "document", (0, 0, 520, 140))
     loc = locate.Located(value, run, run, None, "ocr+read", "842607130031480842")
-    copy = synth.make_copy(img, [value], [[loc]], seed=3, context="", read_page=lambda p: "")
-    change = copy.key["changes"][0]
+    copy = synth.make_copy([synth.Analysed(img, [value], [[loc]], "")], seed=3, read_page=lambda p: "")
+    change = copy.key["pages"][0]["changes"][0]
     assert change["places"][0]["barcode"][1] == 20 and change["places"][0]["barcode_valid"]
-    assert copy.private_key["changes"][0]["old"] == "842607130031480842"
+    assert copy.private_key["pages"][0]["changes"][0]["old"] == "842607130031480842"
     new_digits = match.digits(change["new"])
     bars = change["places"][0]["barcode"]
-    out_gray = copy.image.convert("L")
+    out_gray = copy.images[0].convert("L")
     row = [geometry.pixels(out_gray)[x, 50] < 128 for x in range(bars[0], bars[2])]
     module = (bars[2] - bars[0]) / sum(barcode.widths_for(new_digits))
     assert barcode.decode_widths([max(1, round(n / module)) for n in barcode.runs(row)]) == new_digits
