@@ -467,3 +467,13 @@ def test_find_value_run_lengths_and_threshold():
     assert match.find_value("AB CDEFGH", words) == match.Match(0, 0, 3, 1.0)  # a 2-word value spans up to 4
     assert match.find_value("ABCDEFX", [["ABCDEFG"]], min_score=6 / 7) == match.Match(0, 0, 0, 6 / 7)
     assert match.find_all("ABC", [["ABC", "ABC", "ABC"]]) == [match.Match(0, i, i, 1.0) for i in range(3)]
+
+
+def test_one_slip():
+    assert match.one_slip("66128244", "Terminal-ID 66128344")
+    assert match.one_slip("0312", "0312")
+    assert not match.one_slip("10117 BERLIN", "10178 Berlin")  # two digits: another postcode
+    assert match.one_slip("800 / 77 88 990", "0800 / 77 88 990")  # one dropped digit
+    assert not match.one_slip("800 / 77 88 99", "0800 / 77 88 990")  # two
+    assert not match.one_slip("8001", "0800")
+    assert match.one_slip("Keller", "Kellner")

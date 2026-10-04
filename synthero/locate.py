@@ -121,10 +121,12 @@ def _ocr_place(page: Page, value: Value, m: match.Match, exact: bool) -> Located
     printed = _printed(page.read(_crop(page, run)), value)
     if exact:
         return Located(value, line, run, nxt, "ocr", printed or value.text)
-    # OCR and the model disagree on a digit: the reading says what is printed, and must be
-    # close to the value. Boxes that another value matched exactly are not taken (`locate`),
-    # and the leak check searches every reading.
-    return None if printed is None else Located(value, line, run, nxt, "ocr+read", printed)
+    # OCR and the model disagree on a digit: the reading says what is printed, and may differ
+    # from the value by one misread digit at most. Boxes that another value matched exactly
+    # are not taken (`locate`), and the leak check searches every reading.
+    if printed is None or not match.one_slip(value.text, printed):
+        return None
+    return Located(value, line, run, nxt, "ocr+read", printed)
 
 
 def via_pixels(page: Page, value: Value, search_lines: int = 6) -> Located | None:
@@ -170,13 +172,15 @@ def _value_in_line(page: Page, value: Value, line: Box, reading: str) -> Located
     """
     words = reading.split()
     m = match.find_value(value.text, [words], strict=False)
+    if m is not None and not match.one_slip(value.text, " ".join(words[m.first_word : m.last_word + 1])):
+        m = None
     boxes = next((b for b in _word_box_options(page, line) if len(b) == len(words)), None)
     if m is not None and boxes is not None:
         run = _union(boxes[m.first_word : m.last_word + 1])
         nxt = boxes[m.last_word + 1][0] if m.last_word + 1 < len(boxes) else None
         return Located(value, line, run, nxt, "pixels", " ".join(words[m.first_word : m.last_word + 1]))
     same_words = len(value.text.split()) == len(words)
-    if same_words and match.similarity(reading, value.text) >= 0.85 and match.close_digits(value.text, reading):
+    if same_words and match.similarity(reading, value.text) >= 0.85 and match.one_slip(value.text, reading):
         return Located(value, line, line, None, "pixels", reading.strip())
     if m is not None:
         return _value_by_line_ocr(page, value, line, " ".join(words[m.first_word : m.last_word + 1]))

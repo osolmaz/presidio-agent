@@ -45,6 +45,21 @@ def similarity(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, na, nb).ratio()
 
 
+def one_slip(value: str, reading: str) -> bool:
+    """The digits are equal, or one digit was misread, dropped, or added (edit distance 1).
+
+    A second reading may correct a value by one digit; two changed digits are another
+    number (a postcode 10117 is not 10178).
+    """
+    dv, dr = digits(value), digits(reading)
+    if abs(len(dv) - len(dr)) > 1:
+        return False
+    if len(dv) == len(dr):
+        return sum(a != b for a, b in zip(dv, dr, strict=True)) <= 1
+    short, long = sorted((dv, dr), key=len)
+    return any(long[:i] + long[i + 1 :] == short for i in range(len(long)))
+
+
 def _digits_ok(value: str, run: str, strict: bool) -> bool:
     return same_digits(value, run) if strict else close_digits(value, run)
 
