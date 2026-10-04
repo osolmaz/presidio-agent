@@ -42,6 +42,37 @@ def pieces(old_value: str, type_: str = "person") -> set[str]:
     return {p for p in out if len(p) >= 4}
 
 
+LONG_DIGITS = 6  # a digit piece this long is unlikely to occur inside another number by chance
+
+
+def digit_runs(text: str) -> set[str]:
+    """The numbers on a page: digit runs within each word ("12.07.2026" is one run), and the
+    joins of neighbouring all-digit words ("00 075 00", IBAN blocks), never across a letter."""
+    runs: set[str] = set()
+    group: list[str] = []
+    for word in text.split():
+        compact = re.sub(r"[.\-/:]", "", word)
+        runs.update(re.findall(r"\d+", compact))
+        if compact.isdigit():
+            group.append(compact)
+            runs.add("".join(group))
+            runs.update("".join(group[i:]) for i in range(len(group)))
+        else:
+            group = []
+    return runs
+
+
+def _on_page(piece: str, page: str, runs: set[str]) -> bool:
+    """A word piece anywhere in the page; a digit piece as a whole number, or inside one when long.
+
+    Matching digits across the whole normalised page would join neighbouring numbers
+    ("2026 07" holds "2607") and report leaks that are not there.
+    """
+    if not piece.isdigit():
+        return piece in page
+    return piece in runs or (len(piece) >= LONG_DIGITS and any(piece in r for r in runs))
+
+
 def check(
     page_text: str, old_values: Iterable[tuple[str, str]], context: str, new_values: Iterable[str] = ()
 ) -> list[Leak]:
@@ -53,13 +84,16 @@ def check(
     name, e-mail, or number never is.
     """
     page = norm(page_text)
+    runs = digit_runs(page_text)
     shared = norm(context)
     new_text = "|".join(norm(v) for v in new_values)
     leaks: list[Leak] = []
     for type_, old in old_values:
         excusable = type_ in PLACE_TYPES
         found = sorted(
-            p for p in pieces(old, type_) if p in page and p not in new_text and not (excusable and p in shared)
+            p
+            for p in pieces(old, type_)
+            if _on_page(p, page, runs) and p not in new_text and not (excusable and p in shared)
         )
         if found:
             leaks.append({"type": type_, "pieces": found})

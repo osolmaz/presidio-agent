@@ -27,7 +27,7 @@ YEAR_FOR_DAY_MONTH = 2000  # a leap year, so 29.02. without a year stays valid
 
 PATTERN = re.compile(
     rf"(?P<iso>(?P<iy>\d{{4}})-(?P<im>\d{{2}})-(?P<id>\d{{2}}))"
-    rf"|(?P<dot>(?<![\d.])(?P<dd>\d{{1,2}})\.(?P<dm>\d{{1,2}})\.(?P<dy>\d{{4}}|\d{{2}}(?!\d))?(?![\d,]))"
+    rf"|(?P<dot>(?<![\d.])(?P<dd>\d{{1,2}})\.(?P<dm>\d{{1,2}})\.(?P<dy>\d{{4}}|\d{{2}}(?!\d))?(?!\d|,\d))"
     rf"|(?P<slash>(?<!\d)(?P<sd>\d{{1,2}})/(?P<sm>\d{{1,2}})/(?P<sy>\d{{4}}|\d{{2}})(?!\d))"
     rf"|(?P<dmy>(?<!\d)(?P<nd>\d{{1,2}})(?P<ndot>\.?)\s+(?P<nm>{_MONTH})(?P<nmdot>\.?)(?:\s+(?P<ny>\d{{4}}))?)"
     rf"|(?P<mdy>(?P<md>{_MONTH})(?P<mddot>\.?)\s+(?P<mdd>\d{{1,2}})(?P<comma>,?)\s+(?P<mdy_y>\d{{4}}))"

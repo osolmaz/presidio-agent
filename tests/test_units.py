@@ -513,3 +513,81 @@ def test_one_slip():
     assert not match.one_slip("800 / 77 88 99", "0800 / 77 88 990")  # two
     assert not match.one_slip("8001", "0800")
     assert match.one_slip("Keller", "Kellner")
+
+
+def test_contains_boundaries():
+    assert match.contains("ABCD", "ABCD")
+    assert match.contains("ABC", "ABCD")  # shorter reading: 6/7 similar
+    assert not match.contains("ABC", "ABCD", min_score=0.86)
+    assert match.contains("ABCE", "ABCD", min_score=0.75)  # the same length, one letter off: 3/4
+    assert not match.contains("ABCE", "ABCD", min_score=0.76)
+    assert match.contains("xxABCEyy", "ABCD", min_score=0.75)  # the window at offset 2
+    assert match.contains("ABCD", "ABCE", min_score=0.75) and not match.contains("WXYZ", "ABCD", min_score=0.1)
+    assert match.contains("ZZZZZZZABCD", "ABCD")  # the last window counts too
+    assert match.contains("ABCDZZZZZZZ", "ABCD")  # and the first
+
+
+def test_parse_edges():
+    good = {"text": "KELLER", "type": "person", "owner": "STAFF", "bbox_2d": [10, 20, 30, 40]}
+    assert detect.parse([good], 1000, 2000) == [Value("KELLER", "person", "staff", (10, 40, 30, 80))]
+    assert detect.parse([{"text": "x", "type": "id", "bbox_2d": [1, 2, "3", 4]}], 1000, 1000)[0].hint == (
+        0,
+        0,
+        1000,
+        1000,
+    )
+    assert detect.parse([{"text": "x", "type": "id", "owner": None}], 10, 10)[0].owner == "document"
+    assert detect.parse(["junk", good], 1000, 2000)[0].text == "KELLER"  # junk before a good item is skipped
+    assert detect.parse([{"text": "x", "type": "nope"}, good], 1000, 2000)[0].text == "KELLER"
+    assert detect.parse([{"text": "", "type": "id"}, good], 1000, 2000)[0].text == "KELLER"
+    assert len(detect.parse([good, good | {"owner": "x"}, good | {"type": "street"}], 10, 10)) == 2
+
+
+def test_split_compound_limits():
+    hint = (0, 0, 1, 1)
+    two = Value("4827 12.07.2026", "id", "d", hint)
+    assert [(p.text, p.type) for p in detect.split_compound(two)] == [("4827", "id"), ("12.07.2026", "date")]
+    assert detect.split_compound(Value("4827 12.07.2026", "card", "d", hint)) == [
+        Value("4827 12.07.2026", "card", "d", hint)
+    ]
+    assert detect.split_compound(Value("12.07.2026", "id", "d", hint)) == [Value("12.07.2026", "id", "d", hint)]
+    parts = detect.split_compound(Value("A17 105 19:10", "id", "d", hint))
+    assert [(p.text, p.type) for p in parts] == [("105", "id"), ("19:10", "time")]  # "A17" has 2 digits only
+
+
+def test_card_and_iban_layout_rules():
+    rng = random.Random(2)
+    short = values.card_like("4111 1111 111", rng)  # 11 digits: not a full card number, no Luhn digit forced
+    assert len(short) == 13 and short[4] == " "
+    expiry = values.card_like("XXXX XXXX XXXX 1234", rng)
+    assert expiry.startswith("XXXX XXXX XXXX ") and expiry != "XXXX XXXX XXXX 1234"
+    full = values.card_like("4111-1111-1111-1111", rng)
+    assert full.count("-") == 3 and values.luhn_ok(full.replace("-", ""))
+    prefixed = values.iban_like("IBAN: DE92 1000 0000 1357 9246 80", rng)
+    assert prefixed.startswith("IBAN: DE") and len(prefixed) == len("IBAN: DE92 1000 0000 1357 9246 80")
+    gb = values.iban_like("GB82WEST12345698765432", rng)
+    assert gb[:2] == "GB" and gb[4:8] == "WEST" and values.iban_check("GB", gb[4:]) == gb[2:4]
+
+
+def test_date_errors_and_case():
+    assert dates.shift("29.02.", 1) == "01.03."  # without a year: a leap year, so 29.02. is valid
+    assert dates.shift("30.02.", 1) == "30.02."
+    assert dates.shift("JUL 01 2026", 1) == "JUL 02 2026"
+    assert dates.shift("jul 01 2026", 1) == "jul 02 2026"
+    assert dates.shift("2026-02-30", 1) == "2026-02-30"
+    assert dates.shift("1. Sept. 2026", 30) == "1. Oct. 2026"
+
+
+def test_digit_pieces_do_not_join_neighbouring_numbers():
+    assert leak.check("Datum 2026 07 Uhr", [("id", "HDXG2607A41")], "") == []
+    assert leak.check("Ref HDXG2607A41", [("id", "HDXG2607A41")], "") != []
+    assert leak.check("Pos 00 075 00", [("id", "00 075 00")], "") != []
+    assert leak.check("IBAN DE41 1000 0000 9753 1864 20", [("iban", "DE41 1000 0000 9753 1864 20")], "") != []
+    assert leak.check("Nr 9975318642", [("id", "753186")], "") != []  # long pieces inside a number
+    assert leak.check("Nr 912607", [("id", "2607")], "") == []  # short ones only as whole numbers
+    assert leak.digit_runs("12.07.2026 A1 22 33") == {"12072026", "1", "22", "33", "2233"}
+
+
+def test_a_date_before_a_comma_shifts_but_an_amount_does_not():
+    assert dates.shift("am 31.07.2026, 17:49", 1) == "am 01.08.2026, 17:49"
+    assert dates.shift("12.07,50", 1) == "12.07,50"

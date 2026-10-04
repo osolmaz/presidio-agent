@@ -97,10 +97,13 @@ def ascii_mail(s: str) -> str:
 
 
 def same_shape(old: str, rng: random.Random) -> str:
-    """New digits and letters in the same places; separators and masking stars stay."""
+    """New digits and letters in the same places; separators and masks (****, XXXX, ####) stay."""
+    masked = {i for m in re.finditer(r"[Xx]{2,}", old) for i in range(m.start(), m.end())}
     out, first = [], True
-    for c in old:
-        if c.isdigit():
+    for i, c in enumerate(old):
+        if i in masked:
+            out.append(c)
+        elif c.isdigit():
             out.append(str(rng.randint(1 if first else 0, 9)))
             first = False
         elif c.isalpha() and c.isascii():
@@ -147,7 +150,7 @@ def card_like(old: str, rng: random.Random) -> str:
     """
     new = same_shape(old, rng)
     digits = re.sub(r"\D", "", new)
-    if len(digits) < 12 or "*" in old or "X" in old.upper().replace("EXP", ""):
+    if len(digits) < 12 or re.search(r"[*#•]|[Xx]{2,}", old):  # masked: the check digit is unknown
         return new
     body = digits[:-1]
     check = next(str(c) for c in range(10) if luhn_ok(body + str(c)))
