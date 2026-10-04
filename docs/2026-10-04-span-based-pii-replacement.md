@@ -58,6 +58,45 @@ two copies each, on Qwen3.8-27B Q6_K. Pass when: the `Verkäufer:` label stays
 and the salesperson gets a name different from the customer's; every copy passes
 the leak check; and the leak check still flags every field on the original.
 
+## Positions from OCR (added 2026-10-05)
+
+The model's line coordinates were the weak point: smaller models placed some
+boxes one or more lines off, so edits landed on the wrong line or were skipped.
+Positions now come from Tesseract 5.3.4 (`deu+eng`), which gives every word an
+exact box. Bonsai gets the image and the OCR lines and only marks which pieces
+are PII. Tesseract reads cell borders and specks as `|`, `]`, and `\`: words are
+split at `|` and these characters are never drawn. A span is edited only when
+every word it covers has an OCR box with ink in it that is not taller than about
+1.6 lines; other spans stay unedited and the leak check flags them.
+
 ## Results
 
-To be filled in after the test.
+On page 2 of `drucker.pdf`, with Ternary Bonsai 2 27B PQ2_0 through the Llama
+app on khazaddum (14.7 GB of the 16 GB GPU), about 100 s per run of two copies:
+
+- Positions: Bonsai alone located 10 of 12 spans; with Tesseract boxes, 14 of 15.
+- The `Verkäufer:` label stays, and the salesperson, manager, and customer get
+  different invented names.
+- The header row (number, dates) is clean: values in their cells, borders intact.
+- The leak check works as a gate: it flags spans that could not be edited (the
+  contract number, whose OCR box spans two lines), and it no longer excuses a
+  surviving name or number because the same text appears elsewhere on the page.
+
+Open problems:
+
+1. **Detection recall.** In the three OCR-based runs, Bonsai did not mark the
+   customer's name `LEON HARTMANN`, although it marked the e-mail that contains
+   it. A missed span is not edited.
+2. **Merged OCR boxes.** On the customer block, Tesseract's box for the street
+   line reaches into the name line above. The new street is drawn over the
+   bottom of the name, and the old street's row stays empty. The height check
+   compares a word with its own line, so it misses a line whose words are all
+   too tall; it should compare with the page's typical line height.
+3. **Read-back** is 6 of 10 lines. Part of it is OCR noise in the expected text.
+4. **Over-marking.** Bonsai also marks the insurer's address and the shop's own
+   IBAN. Harmless, but `same_shape` then turns the IBAN's `DE` into random letters.
+5. **Barcodes** still encode the old values; the leak check reads only text.
+
+Next: compare box heights with the page's typical line height; run detection
+twice (two prompts or two models) and take the union of spans; keep IBAN and
+card prefixes; then redraw or blank barcodes.
