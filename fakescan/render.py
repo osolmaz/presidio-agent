@@ -297,6 +297,49 @@ def replace_line(scan: Image.Image, box, new_text: str, old_text: str = "", pad=
     ImageDraw.Draw(mask).rectangle((2, 0 if pad_top < 3 else 2, w - 3, h - 1 if pad_bottom < 3 else h - 3), fill=255)
     mask = mask.filter(ImageFilter.GaussianBlur(1.5))
     out = scan.convert("RGB").copy()
+    # Erase every connected piece of the old value's ink first, also where it reaches
+    # outside the box, so no sliver of an old letter survives.
+    erase_old_ink(out, gray, (vx1, ty1, tx2, ty2), cut, ink_h, paper)
     out.paste(patch, area[:2], mask)
     line_area = (min(area[0], tight[0]), min(area[1], tight[1]), max(area[2], tight[2]), max(area[3], tight[3]))
     return out, line_area
+
+
+def erase_old_ink(out: Image.Image, gray: Image.Image, value_box, cut, ink_h, paper):
+    """Paint paper over all ink connected to the old value, plus one pixel around it.
+
+    Table lines touch the value too; a piece much taller or wider than the text is
+    left alone.
+    """
+    vx1, vy1, vx2, vy2 = value_box
+    m = max(4, ink_h)
+    rx1, ry1 = max(0, vx1 - m), max(0, vy1 - m)
+    rx2, ry2 = min(gray.width, vx2 + 3 * m), min(gray.height, vy2 + m)
+    w, h = rx2 - rx1, ry2 - ry1
+    px = gray.load()
+    ink = [[px[rx1 + x, ry1 + y] < cut for x in range(w)] for y in range(h)]
+    seen = [[False] * w for _ in range(h)]
+    keep = Image.new("L", (w, h), 0)
+    kp = keep.load()
+    for sy in range(vy1 - ry1, vy2 - ry1):
+        for sx in range(vx1 - rx1, vx2 - rx1):
+            if not (0 <= sy < h and 0 <= sx < w) or not ink[sy][sx] or seen[sy][sx]:
+                continue
+            stack, comp = [(sx, sy)], []
+            seen[sy][sx] = True
+            while stack:
+                x, y = stack.pop()
+                comp.append((x, y))
+                for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                    if 0 <= nx < w and 0 <= ny < h and ink[ny][nx] and not seen[ny][nx]:
+                        seen[ny][nx] = True
+                        stack.append((nx, ny))
+            xs = [p[0] for p in comp]
+            ys = [p[1] for p in comp]
+            if max(ys) - min(ys) > 2.2 * ink_h or max(xs) - min(xs) > 3 * (vx2 - vx1 + ink_h):
+                continue  # a table line, not a letter
+            for x, y in comp:
+                kp[x, y] = 255
+    keep = keep.filter(ImageFilter.MaxFilter(5))  # the grey anti-aliased rim around each letter
+    paper_img = Image.new("RGB", (w, h), paper)
+    out.paste(paper_img, (rx1, ry1), keep)

@@ -18,11 +18,17 @@ def figure(src, title, body=""):
 
 
 def key_table(key):
+    """New values only: the original data never appears on the page."""
     rows = "".join(
-        f"<tr><td>{html.escape(c['field'])}</td><td>{html.escape(c['old'])}</td><td>{html.escape(c['new'])}</td>"
-        f"<td class={'ok' if c.get('read_back_ok') else 'bad'}>{'yes' if c.get('read_back_ok') else html.escape(c.get('read_back', '-'))}</td></tr>"
+        f"<tr><td>{html.escape(c['field'])}</td><td>{html.escape(c['new'])}</td>"
+        f"<td class={'ok' if c.get('read_back_ok') else 'bad'}>{'yes' if c.get('read_back_ok') else 'no'}</td></tr>"
         for c in key["changes"])
-    return f'<table><tr><th>field</th><th>old</th><th>new</th><th>read back</th></tr>{rows}</table>'
+    lc = key.get("leak_check")
+    verdict = ""
+    if lc is not None:
+        verdict = ('<p class=ok>Leak check passed: no original value found on the page.</p>' if lc["passed"] else
+                   f'<p class=bad>Leak check failed in: {html.escape(", ".join(lc["leaked_fields"]))}</p>')
+    return verdict + f'<table><tr><th>field</th><th>new value</th><th>read back</th></tr>{rows}</table>'
 
 
 def build(out):
@@ -32,6 +38,8 @@ def build(out):
         cards = [figure(f"{stem}.original.png", "Original scan"),
                  figure(f"{stem}.boxes.png", "Found lines", "<span>red: changed, blue: kept</span>")]
         for img in sorted(glob.glob(os.path.join(out, f"{stem}.copy-*.png"))):
+            if img.endswith(".private.png"):
+                continue
             key = json.load(open(img[:-4] + ".json"))
             ok = sum(c.get("read_back_ok", False) for c in key["changes"])
             title = f"{os.path.basename(img)[len(stem) + 1:-4]}: {ok}/{len(key['changes'])} read back"

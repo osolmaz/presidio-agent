@@ -15,7 +15,7 @@ import re
 
 from PIL import Image, ImageDraw
 
-from . import fields, render, values, vl
+from . import fields, leak, render, values, vl
 
 
 def norm(s: str) -> str:
@@ -44,11 +44,21 @@ def debug_boxes(scan: Image.Image, lines, path: str):
     img.save(path)
 
 
-def make_copy(scan, lines, seed, verify=True):
+def changed_part(old: str, new: str) -> str:
+    """The words of `old` from the first word that differs: the value, without its label."""
+    o, n = old.split(), new.split()
+    k = 0
+    while k < min(len(o), len(n)) - 1 and o[k] == n[k]:
+        k += 1
+    return " ".join(o[k:])
+
+
+def make_copy(scan, lines, seed, verify=True, leak_check=True):
+    """Return the copy, its public answer key (no old values), and the private old-to-new mapping."""
     rng = random.Random(seed)
     person = values.Person(rng)
     out = scan.convert("RGB").copy()
-    changes = []
+    public, private = [], []
     for ln in lines:
         if ln["field"] == "none":
             continue
@@ -56,13 +66,21 @@ def make_copy(scan, lines, seed, verify=True):
         if new_text == ln["text"]:
             continue
         out, padded = render.replace_line(out, ln["box"], new_text, ln["text"])
-        change = {"field": ln["field"], "old": ln["text"], "new": new_text, "box": list(ln["box"])}
+        change = {"field": ln["field"], "new": new_text, "box": list(ln["box"])}
         if verify:
-            got = vl.read_text(out.crop(padded))
-            change["read_back"] = got
-            change["read_back_ok"] = norm(got) == norm(new_text)
-        changes.append(change)
-    return out, {"seed": seed, "person": vars(person), "changes": changes}
+            change["read_back_ok"] = norm(vl.read_text(out.crop(padded))) == norm(new_text)
+        public.append(change)
+        private.append({"field": ln["field"], "old": ln["text"], "new": new_text,
+                        "old_value": changed_part(ln["text"], new_text)})
+    key = {"seed": seed, "person": vars(person), "changes": public}
+    if leak_check:
+        _, leaks = leak.check(out, private)
+        # The public key says which fields leaked, never the leaked text.
+        key["leak_check"] = {"passed": not leaks, "leaked_fields": [x["field"] for x in leaks]}
+        private_key = {"seed": seed, "changes": private, "leaks": leaks}
+    else:
+        private_key = {"seed": seed, "changes": private}
+    return out, key, private_key
 
 
 def main():
@@ -71,23 +89,34 @@ def main():
     ap.add_argument("--n", type=int, default=3)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--out", default="/dev/shm/fake-scan/out")
+    ap.add_argument("--private", default="/dev/shm/fake-scan/private",
+                    help="folder for the original text and old-to-new mappings; never serve or share it")
     ap.add_argument("--no-verify", action="store_true")
+    ap.add_argument("--no-leak-check", action="store_true")
     a = ap.parse_args()
 
     os.makedirs(a.out, exist_ok=True)
+    os.makedirs(a.private, exist_ok=True)
     scan = Image.open(a.scan).convert("RGB")
     stem = os.path.splitext(os.path.basename(a.scan))[0]
-    lines = analyse(scan, os.path.join(a.out, f"{stem}.lines.json"))
+    lines = analyse(scan, os.path.join(a.private, f"{stem}.lines.json"))
     debug_boxes(scan, lines, os.path.join(a.out, f"{stem}.boxes.png"))
     scan.save(os.path.join(a.out, f"{stem}.original.png"))
     print(f"{len(lines)} lines, {sum(ln['field'] != 'none' for ln in lines)} to change", flush=True)
 
     for i in range(a.n):
-        img, key = make_copy(scan, lines, a.seed + i, verify=not a.no_verify)
-        img.save(os.path.join(a.out, f"{stem}.copy-{i + 1}.png"))
-        json.dump(key, open(os.path.join(a.out, f"{stem}.copy-{i + 1}.json"), "w"), indent=1, ensure_ascii=False)
+        img, key, private_key = make_copy(scan, lines, a.seed + i, verify=not a.no_verify,
+                                          leak_check=not a.no_leak_check)
+        base = os.path.join(a.out, f"{stem}.copy-{i + 1}")
+        img.save(base + ".png")
+        json.dump(key, open(base + ".json", "w"), indent=1, ensure_ascii=False)
+        # The old-to-new mapping holds the original data: keep it apart and never share it.
+        json.dump(private_key, open(os.path.join(a.private, f"{stem}.copy-{i + 1}.private.json"), "w"),
+                  indent=1, ensure_ascii=False)
         ok = sum(c.get("read_back_ok", False) for c in key["changes"])
-        print(f"copy {i + 1}: {len(key['changes'])} fields changed, {ok} read back correctly", flush=True)
+        lc = key.get("leak_check")
+        verdict = "" if lc is None else ("leak check passed" if lc["passed"] else f"LEAK in {lc['leaked_fields']}")
+        print(f"copy {i + 1}: {len(key['changes'])} fields changed, {ok} read back correctly, {verdict}", flush=True)
 
 
 if __name__ == "__main__":
