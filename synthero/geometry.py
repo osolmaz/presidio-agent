@@ -42,6 +42,22 @@ def paper_level(gray: Image.Image) -> int:
     return data[min(len(data) - 1, int(len(data) * 0.9))] if data else 255
 
 
+def paper_colour(img: Image.Image) -> tuple[int, int, int]:
+    """The paper's colour: the per-channel median of the pixels near the paper's gray level.
+
+    Scans and printed paper are rarely neutral gray; a gray patch on cream paper shows.
+    """
+    rgb = img.convert("RGB")
+    level = paper_level(rgb.convert("L"))
+    gray = gray_values(rgb)
+    raw = rgb.tobytes()
+    near = [i for i, v in enumerate(gray) if v >= level - 10]
+    if not near:
+        return (level, level, level)
+    r, g, b = (sorted(raw[3 * i + c] for i in near)[len(near) // 2] for c in range(3))
+    return (r, g, b)
+
+
 def ink_threshold(gray: Image.Image) -> int:
     """Pixels darker than this are ink: 70 levels below the paper."""
     return paper_level(gray) - 70

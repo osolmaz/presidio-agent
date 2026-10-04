@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from synthero import fonts
-from synthero.geometry import Box, gray_values, paper_level, pixels
+from synthero.geometry import Box, gray_values, paper_colour, paper_level, pixels
 
 RGB = tuple[int, int, int]
 
@@ -90,7 +90,8 @@ class Measure:
 
     value_box: Box
     cut: int
-    paper: int
+    paper: int  # gray level
+    colour: tuple[int, int, int]  # the paper's colour
 
     @property
     def ink_h(self) -> int:
@@ -103,7 +104,10 @@ def measure(source: Image.Image, line_box: Box, run_box: Box) -> Measure:
     local = gray.crop((max(0, lx1 - 20), max(0, ly1 - 10), min(gray.width, lx2 + 20), min(gray.height, ly2 + 10)))
     paper = paper_level(local)
     ty1, ty2 = _value_rows(gray, run_box[0], run_box[2], ly1, ly2, paper - 70)
-    return Measure((run_box[0], ty1, run_box[2], ty2), paper - 70, paper)
+    colour = paper_colour(
+        source.crop((max(0, lx1 - 20), max(0, ly1 - 10), min(gray.width, lx2 + 20), min(gray.height, ly2 + 10)))
+    )
+    return Measure((run_box[0], ty1, run_box[2], ty2), paper - 70, paper, colour)
 
 
 def replace_words(
@@ -128,7 +132,7 @@ def replace_words(
     m = measure(source, line_box, run_box)
     vx1, ty1, vx2, ty2 = value_box = m.value_box
     cut, ink_h = m.cut, m.ink_h
-    paper: RGB = (m.paper, m.paper, m.paper)
+    paper: RGB = m.colour
     original = source.crop(value_box)
     ink = _ink_colour(original, cut)
     font, width_scale = fonts.best(original, old, ink_h, style)
@@ -171,7 +175,8 @@ def replace_words(
     out = dest.convert("RGB").copy()
     # Erase every connected piece of the old value's ink first, also where it reaches
     # outside the box, so no sliver of an old letter survives.
-    erase_old_ink(out, gray, value_box, cut, ink_h, paper)
+    # Letters are found with a light cut, so the blur halo of a scanned letter goes with it.
+    erase_old_ink(out, gray, value_box, m.paper - 25, ink_h, paper)
     out.paste(patch, area[:2], mask)
     read_area = (min(area[0], lx1), min(area[1], ly1), max(area[2], lx2), max(area[3], ly2))
     return out, read_area

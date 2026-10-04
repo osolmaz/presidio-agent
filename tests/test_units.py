@@ -628,3 +628,9 @@ def test_full_extent_follows_uneven_bar_ends():
         d.rectangle((10 + 6 * i, 30 - i // 5, 12 + 6 * i, 60 + i // 5), fill=0)  # skewed ends
     assert barcode.full_extent(img, (10, 34, 127, 57), limit=10) == (9, 27, 128, 64)
     assert barcode.full_extent(img, (10, 34, 127, 57), limit=2)[1] == 32
+
+
+def test_paper_colour_is_the_tint_of_the_paper_not_the_ink():
+    img = Image.new("RGB", (40, 20), (246, 240, 228))
+    ImageDraw.Draw(img).text((2, 2), "Leon", fill=(20, 20, 20))
+    assert geometry.paper_colour(img) == (246, 240, 228)
