@@ -29,9 +29,20 @@ def same_digits(value: str, candidate: str) -> bool:
     return digits(value) == digits(candidate) if digits(value) else True
 
 
+# Letters a reader confuses with digits by their shape.
+CONFUSABLE = str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1", "Z": "2", "z": "2", "S": "5", "B": "8", "G": "6"})
+
+
+def folded_digits(s: str) -> str:
+    """The digits of `s` after folding look-alike letters (Z to 2, O to 0, ...) inside codes:
+    words with at least one digit. Plain words ("Terminal-ID") are not folded. For comparing
+    two readings of the same characters, never for deciding that two values are equal."""
+    return "".join(digits(w.translate(CONFUSABLE) if re.search(r"\d", w) else w) for w in s.split())
+
+
 def close_digits(value: str, candidate: str, min_score: float = 0.75) -> bool:
     """Digits that differ by a misread or two, as when one reader got a digit wrong."""
-    dv, dc = digits(value), digits(candidate)
+    dv, dc = folded_digits(value), folded_digits(candidate)
     if not dv:
         return True
     return bool(dc) and difflib.SequenceMatcher(None, dv, dc).ratio() >= min_score
@@ -55,7 +66,7 @@ def one_slip(value: str, reading: str) -> bool:
     number (a postcode 10117 is not 10178). A short number with a digit changed is just
     another number ("0000" is not "0,00"), so values under six digits need equal digits.
     """
-    dv, dr = digits(value), digits(reading)
+    dv, dr = folded_digits(value), folded_digits(reading)
     if dv == dr:
         return True
     if len(dv) < SLIP_MIN_DIGITS:

@@ -117,12 +117,19 @@ def split_compound(v: Value) -> list[Value]:
     return parts
 
 
+def _not_personal(v: Value) -> bool:
+    """Amounts, and a year alone, identify no one; they are never replaced."""
+    return (v.type in ("id", "card") and is_amount(v.text)) or (
+        v.type == "date" and re.fullmatch(r"(19|20)\d{2}", v.text) is not None
+    )
+
+
 def normalise(values: list[Value]) -> list[Value]:
-    """Compound values split, amounts dropped, and every (text, type) once."""
+    """Compound values split, amounts and bare years dropped, and every (text, type) once."""
     out: list[Value] = []
     seen: set[tuple[str, str]] = set()
     for v in (part for value in values for part in split_compound(value)):
-        if (v.text, v.type) not in seen and not (v.type in ("id", "card") and is_amount(v.text)):
+        if (v.text, v.type) not in seen and not _not_personal(v):
             seen.add((v.text, v.type))
             out.append(v)
     return out

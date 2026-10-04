@@ -451,7 +451,8 @@ def test_amounts_are_never_values():
         assert not detect.is_amount(not_amount), not_amount
     hint = (0, 0, 1, 1)
     values = [Value("146,50 EUR", "id", "d", hint), Value("146,50", "card", "d", hint), Value("1357", "id", "d", hint)]
-    assert detect.normalise(values) == [Value("1357", "id", "d", hint)]
+    values.append(Value("2026", "date", "d", hint))
+    assert detect.normalise(values) == [Value("1357", "id", "d", hint)]  # amounts and a bare year go
 
 
 def _bars(img: Image.Image, x0: int, top: int, bottom: int, count: int = 25) -> None:
@@ -611,3 +612,10 @@ def test_paper_noise_ignores_letter_edges():
     assert render.paper_noise(clean, 255) == 0.0
     grainy = Image.effect_noise((40, 20), 6).point(lambda v: min(255, 200 + v // 8))
     assert render.paper_noise(grainy, 230) > 1
+
+
+def test_near_matches_fold_look_alike_letters():
+    assert match.one_slip("DE8822Z000009988776", "DE88ZZZ00009988776")  # ZZZ read as 22Z, one 0 dropped
+    assert match.close_digits("DE8822Z000009988776", "DE88ZZZ00009988776")
+    assert not match.same_digits("DE8822Z000009988776", "DE88ZZZ00009988776")  # the strict rule does not fold
+    assert match.folded_digits("O1-IZS B") == "01125"  # "B" alone has no digit: a word, not folded
