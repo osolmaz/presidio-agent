@@ -27,7 +27,7 @@ import os
 
 from PIL import Image, ImageDraw
 
-from synthero import detect, locate, source, synth, vl
+from synthero import detect, locate, ocr, source, synth, vl
 from synthero.locate import Located
 
 # Red: OCR words matched the value. Purple: OCR and a second reading agreed on a
@@ -47,7 +47,7 @@ def analyse(page: source.Page, cache: str) -> synth.Analysed:
             vals, locs = synth.analysis_from_json(json.load(f))
     else:
         vals = detect.find_values(page.image, "\n".join(ln.text for ln in page.lines))
-        locs = locate.locate(page.image, vals, page.lines, vl.read_text)
+        locs = locate.locate(page.image, vals, page.lines, vl.read_text, ocr.lines)
         _save(cache, synth.analysis_to_json(vals, locs))
     context = synth.page_context(" ".join(ln.text for ln in page.lines), vals, locs)
     return synth.Analysed(page.image, vals, locs, context)

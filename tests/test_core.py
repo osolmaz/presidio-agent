@@ -377,3 +377,26 @@ def test_make_copy_uses_the_printed_text_and_redraws_the_barcode():
     row = [geometry.pixels(out_gray)[x, 50] < 128 for x in range(bars[0], bars[2])]
     module = (bars[2] - bars[0]) / sum(barcode.widths_for(new_digits))
     assert barcode.decode_widths([max(1, round(n / module)) for n in barcode.runs(row)]) == new_digits
+
+
+def test_line_ocr_places_a_value_when_the_word_splits_disagree():
+    img = page([(20, 20, "Hotline Nummer 0800 / 77 88 990")])
+    gray = img.convert("L")
+    line = geometry.ink_lines(gray)[0]
+    value = Value("800 / 77 88 990", "phone", "business", (0, 0, 600, 60))  # the model dropped a digit
+    reading = "Hotline-Nummer: 0800/77 88 990"  # the reader joins words the ink keeps apart
+    boxes = geometry.word_boxes(gray, line)
+    assert len(boxes) != len(reading.split())
+
+    def line_ocr(crop: Image.Image) -> list[ocr.Line]:  # a fake Tesseract on the enlarged line
+        x = (boxes[2][0] - line[0]) * 3
+        words = [ocr.Word("Hotline", (0, 0, 60, 30)), ocr.Word("Nummer", (70, 0, 140, 30))]
+        words += [
+            ocr.Word(t, (x + 40 * i, 0, x + 40 * i + 30, 30)) for i, t in enumerate(["0800", "/", "77", "88", "990"])
+        ]
+        return [ocr.Line(tuple(words))]
+
+    places = locate.locate(img, [value], [], lambda crop: reading, line_ocr)[0]
+    assert [(p.how, p.printed) for p in places] == [("pixels", "0800/77 88 990")]
+    assert places[0].run_box[0] == boxes[2][0]
+    assert locate.locate(img, [value], [], lambda crop: reading)[0] == []  # without line OCR: not placed

@@ -30,6 +30,11 @@ from synthero.geometry import Box
 from synthero.ocr import Line
 
 Reader = Callable[[Image.Image], str]
+LineOcr = Callable[[Image.Image], list[Line]]  # OCR of one line crop: words with boxes in the crop
+
+
+def _no_line_ocr(crop: Image.Image) -> list[Line]:
+    return []
 
 
 @dataclass(frozen=True)
@@ -57,6 +62,7 @@ class Page:
     lines: list[Line]
     line_h: int
     read: Reader
+    line_ocr: LineOcr = _no_line_ocr
 
     @property
     def rule_px(self) -> int:
@@ -157,9 +163,10 @@ def _word_box_options(page: Page, line: Box) -> list[list[Box]]:
 def _value_in_line(page: Page, value: Value, line: Box, reading: str) -> Located | None:
     """The value's own words inside a line found from pixels, so labels keep their pixels.
 
-    The reading's words are mapped to the line's words, split from pixels or by OCR; when
-    neither split has as many words as the reading and the value is not the whole line,
-    the value is not edited (the leak check gates it).
+    The reading's words are mapped to the line's words, split from pixels or by OCR. When
+    neither split has as many words as the reading, the line alone is OCR'd at three times
+    its size; when that does not place the value either, it is not edited (the leak check
+    gates it).
     """
     words = reading.split()
     m = match.find_value(value.text, [words], strict=False)
@@ -171,7 +178,31 @@ def _value_in_line(page: Page, value: Value, line: Box, reading: str) -> Located
     same_words = len(value.text.split()) == len(words)
     if same_words and match.similarity(reading, value.text) >= 0.85 and match.close_digits(value.text, reading):
         return Located(value, line, line, None, "pixels", reading.strip())
+    if m is not None:
+        return _value_by_line_ocr(page, value, line, " ".join(words[m.first_word : m.last_word + 1]))
     return None
+
+
+LINE_OCR_SCALE = 3
+
+
+def _value_by_line_ocr(page: Page, value: Value, line: Box, printed: str) -> Located | None:
+    """OCR of the line alone, enlarged: its word boxes place a value the reading confirmed."""
+    x0, y0, _, y1 = line
+    crop = page.scan.crop(line)
+    big = crop.resize((crop.width * LINE_OCR_SCALE, crop.height * LINE_OCR_SCALE), Image.Resampling.LANCZOS)
+    words = [w for ln in page.line_ocr(big) for w in ln.words]
+    m = match.find_value(printed, [[w.text for w in words]], min_score=0.75, strict=False)
+    if m is None:
+        return None
+    s = LINE_OCR_SCALE
+
+    def back(b: Box) -> Box:
+        return (x0 + b[0] // s, y0, x0 + -(-b[2] // s), y1)
+
+    run = _union([back(w.box) for w in words[m.first_word : m.last_word + 1]])
+    nxt = back(words[m.last_word + 1].box)[0] if m.last_word + 1 < len(words) else None
+    return Located(value, line, run, nxt, "pixels", printed)
 
 
 def overlaps(a: Box, b: Box, min_share: float = 0.3) -> bool:
@@ -184,7 +215,13 @@ def overlaps(a: Box, b: Box, min_share: float = 0.3) -> bool:
     return w * h >= min_share * max(1, smaller)
 
 
-def locate(scan: Image.Image, values: list[Value], ocr_lines: list[Line], read: Reader) -> list[list[Located]]:
+def locate(
+    scan: Image.Image,
+    values: list[Value],
+    ocr_lines: list[Line],
+    read: Reader,
+    line_ocr: LineOcr = _no_line_ocr,
+) -> list[list[Located]]:
     """For each value, every place it is printed; an empty list when it cannot be found.
 
     Exact OCR matches claim their boxes first; weaker evidence (a corrected digit, a
@@ -192,7 +229,7 @@ def locate(scan: Image.Image, values: list[Value], ocr_lines: list[Line], read: 
     """
     gray = scan.convert("L")
     line_h = geometry.typical_line_height([w.box for ln in ocr_lines for w in ln.words])
-    page = Page(gray, scan, ocr_lines, line_h, read)
+    page = Page(gray, scan, ocr_lines, line_h, read, line_ocr)
     texts = [[w.text for w in ln.words] for ln in ocr_lines]
     result: list[list[Located]] = []
     for v in values:
