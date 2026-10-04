@@ -445,7 +445,7 @@ def test_pieces_by_type():
 
 
 def test_amounts_are_never_values():
-    for amount in ("146,50 EUR", "3.450 Bits", "18,50", "1.234,56 €", "152 Bits"):
+    for amount in ("146,50 EUR", "3.450 Bits", "18,50", "1.234,56 €", "152 Bits", "0,00%", "19 %"):
         assert detect.is_amount(amount), amount
     for not_amount in ("60120873", "12.07.2026", "HRB 789012 B", "00 075 00", "DE312456789", "19:10 Uhr"):
         assert not detect.is_amount(not_amount), not_amount

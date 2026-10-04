@@ -69,4 +69,15 @@ is drawn on its own line, no label is lost, and every copy passes the leak check
 
 ## Results
 
-To be filled in after the test.
+Bonsai (Ternary Bonsai 2 27B, PQ2_0) through the Llama app on khazaddum, one
+16 GB GPU.
+
+- The value-first design worked as planned on page 2 of `drucker.pdf`: the bold
+  name that Tesseract read as `een` was located from pixels and read back, the
+  street was drawn on its own line, and no label was lost.
+- The test then grew into the whole fixture, and each failure it showed changed
+  the design further: crop reads that correct the model's misread digits, claimed
+  boxes, frames ignored by the line finder, a second detection pass, barcodes,
+  per-page fonts, documents, and digital PDFs.
+  [Documents, digital PDFs, and the harness](2026-10-05-documents-pdfs-and-the-harness.md)
+  records those changes and the eval over 24 documents.

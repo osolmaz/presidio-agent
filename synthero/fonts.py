@@ -64,15 +64,29 @@ def ink_mask(img: Image.Image, cut: int) -> Image.Image:
     return mask.crop(box) if box else mask
 
 
+def core_height(mask: Image.Image, share: float = 0.25) -> int:
+    """The rows whose ink reaches `share` of the busiest row's: the letters' body.
+
+    A slight skew or the blur of a scan adds sparse rows at the top and bottom; they do
+    not count, so a scanned value and a clean rendering are measured alike.
+    """
+    w = mask.width
+    data = mask.tobytes()
+    rows = [sum(1 for v in data[y * w : (y + 1) * w] if v) for y in range(mask.height)]
+    busiest = max(rows, default=0)
+    core = [y for y, n in enumerate(rows) if busiest and n >= share * busiest]
+    return core[-1] - core[0] + 1 if core else 0
+
+
 def font_for_ink_height(path: str, text: str, ink_h: int) -> Font:
-    """The largest size at which `text`'s rendered ink is at most `ink_h` tall.
+    """The largest size at which `text`'s rendered core height (`core_height`) is at most `ink_h`.
 
     Measured on the rendered ink: some fonts' boxes include their whole line height.
     """
     low, high = 6, max(8, ink_h * 3)
     while low < high:  # ink height grows with the size, so a binary search finds the largest fit
         mid = (low + high + 1) // 2
-        if render_mask(text, ImageFont.truetype(path, mid)).height <= ink_h:
+        if core_height(render_mask(text, ImageFont.truetype(path, mid))) <= ink_h:
             low = mid
         else:
             high = mid - 1
@@ -108,7 +122,7 @@ def score(target: Image.Image, old: str, ink_h: int, path: str) -> tuple[float, 
     """
     # Sized to the target's own height: both are cut halfway between ink and paper, while
     # `ink_h` also counts the light anti-aliased rows and would make every font too big.
-    font = font_for_ink_height(path, old, target.height if target.height > 1 else ink_h)
+    font = font_for_ink_height(path, old, core_height(target) if target.height > 1 else ink_h)
     rendered = render_mask(old, font)
     w, h = max(1, target.width), max(1, target.height)
     stretched = rendered.resize((w, h), Image.Resampling.BILINEAR).point(lambda v: 255 if v >= 128 else 0)

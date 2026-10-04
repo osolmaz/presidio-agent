@@ -352,11 +352,11 @@ def test_ocr_near_miss_takes_the_printed_text_from_a_second_reading():
     for reading in ("66128344", "66128244", "66128249"):  # agrees with OCR, with the model, with neither
 
         def read(crop: Image.Image, r: str = reading) -> str:
-            return f"Terminal-ID {r}"
+            return r  # the crop holds the number only
 
         places = locate.locate(img, [value], lines, read)[0]
         assert [(p.how, p.printed, p.run_box) for p in places] == [("ocr+read", reading, number)]
-    far = locate.locate(img, [value], lines, lambda crop: "Terminal-ID 99999999")[0]
+    far = locate.locate(img, [value], lines, lambda crop: "99999999")[0]
     assert far == []
 
 
@@ -439,6 +439,9 @@ def test_a_value_wrapped_over_two_lines_is_found_and_split():
         ("wrapped", "DE68", (0, 1)),
         ("wrapped", "1000 0000 2468 1357 90", (1, 6)),
     ]
+    misread = [ocr.Line((*lines[0].words[:-1], ocr.Word("DF68.", lines[0].words[-1].box))), lines[1]]
+    from_value = locate.locate(img, [value], misread, lambda crop: "")[0]
+    assert [p.printed for p in from_value] == ["DE68", "1000 0000 2468 1357 90"]  # never the OCR text
     assert synth.printed_text(value, places) == "DE68 1000 0000 2468 1357 90"
     assert synth.part_of("DE42 7783 5337 4068 1241 58", (1, 6), 6) == "7783 5337 4068 1241 58"
     assert synth.part_of("A B C", (1, 6), 6) == "B C"  # another word count: the same share, never empty
@@ -449,3 +452,51 @@ def test_a_value_wrapped_over_two_lines_is_found_and_split():
     assert len(copy.key["pages"][0]["changes"][0]["places"]) == 2
     _, locs = synth.analysis_from_json(json.loads(json.dumps(synth.analysis_to_json([value], [places]))))
     assert locs == [places]
+
+
+def test_read_span_splits_cell_borders_and_keeps_punctuation():
+    v = Value("EMN-260712-4194", "id", "document", (0, 0, 1, 1))
+    span = locate.read_span("EMN-260712-4194|Datum:", v)
+    assert span is not None and span.printed == "EMN-260712-4194" and span.start == 0 and span.end < 0.75
+    name = locate.read_span("Leon Hartmann,", Value("Leon Hartmann", "person", "c", (0, 0, 1, 1)))
+    assert name is not None and (name.printed, name.before, name.after) == ("Leon Hartmann", "", ",")
+    date = locate.read_span(": 1. Juli 2026", Value("1. Juli 2026", "date", "d", (0, 0, 1, 1)))
+    assert date is not None and (date.printed, date.before) == ("1. Juli 2026", "")
+    assert date.start > 0  # the label's colon lies outside the span: it is trimmed off and kept
+    comma = locate.read_span("Hartmann,", Value("Hartmann", "person", "c", (0, 0, 1, 1)))
+    assert comma is not None and comma.after == ","
+    assert locate.read_span("0,00%", Value("0000", "id", "d", (0, 0, 1, 1))) is None
+
+
+def test_a_run_glued_to_the_next_word_is_trimmed_at_a_gap():
+    img = page([(20, 20, "EMN-260712-4194"), (160, 20, "Datum:")])
+    gray = img.convert("L")
+    words = geometry.word_boxes(gray, geometry.ink_lines(gray)[0])
+    number, label = words[0], words[-1]
+    glued = (number[0], number[1], label[2], number[3])  # Tesseract made one word of both
+    lines = [ocr.Line((ocr.Word("EMN-260712-4194", glued),))]
+    value = Value("EMN-260712-4194", "id", "document", (0, 0, 600, 60))
+    places = locate.locate(img, [value], lines, lambda crop: "EMN-260712-4194|Datum:")[0]
+    assert len(places) == 1 and places[0].printed == "EMN-260712-4194"
+    assert number[2] <= places[0].run_box[2] < label[0]  # the label keeps its pixels
+    assert places[0].next_x is None
+
+
+def test_punctuation_in_the_run_is_drawn_back():
+    img = page([(20, 20, "Lieber Leon Hartmann,")])
+    gray = img.convert("L")
+    line = geometry.ink_lines(gray)[0]
+    words = geometry.word_boxes(gray, line)
+    run = (words[1][0], line[1], words[-1][2], line[3])
+    value = Value("Leon Hartmann", "person", "customer", (0, 0, 600, 60))
+    loc = locate.Located(value, line, run, None, "ocr", "Leon Hartmann", None, "", ",")
+    reads: list[str] = []
+
+    def read(crop: Image.Image) -> str:
+        reads.append("x")
+        return ""
+
+    copy = synth.make_copy([synth.Analysed(img, [value], [[loc]], "")], seed=1, read=read)
+    new = copy.key["pages"][0]["changes"][0]["new"]
+    assert not new.endswith(",")  # the key holds the value; the comma is only drawn
+    assert reads  # the edit was read back

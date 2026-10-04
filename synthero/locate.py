@@ -19,6 +19,7 @@ Order of evidence:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -46,6 +47,8 @@ class Located:
     how: str  # "ocr", "ocr+read", "pixels", or "wrapped"
     printed: str  # the text printed here, which can differ from the model's first reading
     words: tuple[int, int] | None = None  # for a value wrapped over two lines: its words printed here
+    before: str = ""  # punctuation printed in the run before the value, drawn back before the new one
+    after: str = ""  # and after it
 
 
 def _union(boxes: list[Box]) -> Box:
@@ -75,9 +78,12 @@ def _crop(page: Page, box: Box) -> Image.Image:
     """The box with a margin of blank paper around it: letters at a tight edge get misread."""
     pad = max(2, page.line_h // 2)
     x0, y0, x1, y1 = box
-    margin = (max(0, x0 - pad), max(0, y0 - 2), min(page.scan.width, x1 + pad), min(page.scan.height, y1 + 2))
-    out = Image.new("RGB", (margin[2] - margin[0] + 2 * pad, margin[3] - margin[1] + 2 * pad), "white")
-    out.paste(page.scan.crop(margin).convert("RGB"), (pad, pad))
+    # Only the box itself: a margin cut from the page would show a neighbour's letters.
+    inner = (x0, max(0, y0 - 1), x1, min(page.scan.height, y1 + 1))
+    crop = page.scan.crop(inner).convert("RGB")
+    paper = geometry.paper_level(crop.convert("L"))
+    out = Image.new("RGB", (crop.width + 2 * pad, crop.height + 2 * pad), (paper, paper, paper))
+    out.paste(crop, (pad, pad))
     return out
 
 
@@ -100,17 +106,59 @@ def _snap(page: Page, run: Box, line: Box) -> Box:
     return _union([run, *touched]) if touched else run
 
 
-def _printed(reading: str, value: Value) -> str | None:
-    """The span of a full-resolution reading that holds the value, without a label's punctuation.
+@dataclass(frozen=True)
+class Span:
+    """What a reading of a run says about the value in it."""
 
-    A reading that is an amount is never a personal value.
+    printed: str  # the value as printed, without the punctuation around it
+    before: str  # punctuation printed in the run before the value (a label's colon)
+    after: str  # and after it (a comma)
+    start: float  # the value's share of the reading's characters: where it starts...
+    end: float  # ...and ends, from 0 to 1
+
+
+def read_span(reading: str, value: Value) -> Span | None:
+    """The part of a full-resolution reading that holds the value.
+
+    Words are split at spaces and at "|" (a cell border OCR glued to a word). A reading
+    that is an amount is never a personal value.
     """
-    words = reading.split()
-    m = match.find_value(value.text, [words], min_score=0.75, strict=False)
+    text = reading.strip()
+    tokens = list(re.finditer(r"[^\s|]+", text))
+    m = match.find_value(value.text, [[t.group(0) for t in tokens]], min_score=0.75, strict=False)
     if m is None:
         return None
-    printed = " ".join(words[m.first_word : m.last_word + 1]).strip(detect.EDGE_PUNCTUATION)
-    return None if not printed or detect.is_amount(printed) else printed
+    a, b = tokens[m.first_word].start(), tokens[m.last_word].end()
+    raw = text[a:b]
+    printed = raw.strip(detect.EDGE_PUNCTUATION)
+    if not printed or detect.is_amount(printed):
+        return None
+    lead = len(raw) - len(raw.lstrip(detect.EDGE_PUNCTUATION))
+    tail = len(raw) - len(raw.rstrip(detect.EDGE_PUNCTUATION))
+    before, after = raw[:lead], raw[len(raw) - tail :] if tail else ""
+    n = max(1, len(text))
+    return Span(printed, before, after, (a + lead) / n, (b - tail) / n)
+
+
+def _trim(page: Page, run: Box, span: Span) -> Box:
+    """Shrink a run that holds more than the value ("4194|Datum:") to the value's share of it,
+    cut at the nearest blank column so no letter is split."""
+    x0, y0, x1, y1 = run
+    if span.start < 0.05 and span.end > 0.95:
+        return run
+    px = geometry.pixels(page.gray)
+    cut = geometry.ink_threshold(page.gray)
+    blank = [x for x in range(x0, x1) if not any(px[x, y] < cut for y in range(y0, y1))]
+    width = x1 - x0
+
+    def snap(share: float) -> int:
+        x = round(x0 + share * width)
+        near = [b for b in blank if abs(b - x) <= width / 4]
+        return min(near, key=lambda b: abs(b - x)) if near else x
+
+    left = snap(span.start) if span.start >= 0.05 else x0
+    right = snap(span.end) if span.end <= 0.95 else x1
+    return (left, y0, right, y1) if right - left > page.line_h / 2 else run
 
 
 def _ocr_place(page: Page, value: Value, m: match.Match, exact: bool) -> Located | None:
@@ -123,17 +171,22 @@ def _ocr_place(page: Page, value: Value, m: match.Match, exact: bool) -> Located
     run = _snap(page, _clip_rows(run, band), line)
     if not geometry.has_ink(page.gray, run):
         return None
-    nxt = next((w.box[0] for w in words[m.last_word + 1 :] if w.box[0] >= run[2]), None)
     # A full-resolution reading of the run says what is printed there.
-    printed = _printed(page.read(_crop(page, run)), value)
+    span = read_span(page.read(_crop(page, run)), value)
+    trimmed = _trim(page, run, span) if span is not None else run
+    # After a trim the next word may be glued to the value in OCR; the renderer finds the ink.
+    nxt = None if trimmed != run else next((w.box[0] for w in words[m.last_word + 1 :] if w.box[0] >= run[2]), None)
+    run = trimmed
     if exact:
-        return Located(value, line, run, nxt, "ocr", printed or value.text)
+        if span is None:
+            return Located(value, line, run, nxt, "ocr", value.text)
+        return Located(value, line, run, nxt, "ocr", span.printed, None, span.before, span.after)
     # OCR and the model disagree on a digit: the reading says what is printed, and may differ
     # from the value by one misread digit at most. Boxes that another value matched exactly
     # are not taken (`locate`), and the leak check searches every reading.
-    if printed is None or not match.one_slip(value.text, printed):
+    if span is None or not match.one_slip(value.text, span.printed):
         return None
-    return Located(value, line, run, nxt, "ocr+read", printed)
+    return Located(value, line, run, nxt, "ocr+read", span.printed, None, span.before, span.after)
 
 
 def via_pixels(page: Page, value: Value, search_lines: int = 6) -> Located | None:
@@ -239,18 +292,19 @@ def wrapped(page: Page, value: Value, claimed: list[Box]) -> list[Located]:
             if m is None or not (m.first_word < cut <= m.last_word):
                 continue
             top, bottom = words[m.first_word : cut], words[cut : m.last_word + 1]
+            # The text of each part comes from the model's value, never from OCR: split it at
+            # the same share of the characters as the OCR words.
+            value_words = value.text.split()
+            share = sum(len(w.text) for w in top) / max(1, sum(len(w.text) for w in (*top, *bottom)))
+            k = min(max(round(share * len(value_words)), 1), len(value_words) - 1)
             places = []
-            done = 0
-            for line, part in ((upper, top), (lower, bottom)):
+            for line, part, span in ((upper, top, (0, k)), (lower, bottom, (k, len(value_words)))):
                 run = _union([w.box for w in part])
                 if any(overlaps(run, c) for c in claimed):
                     return []
-                text = " ".join(w.text for w in part)
-                count = len(text.split())
-                span = (done, done + count)  # in printed words, over both parts
                 nxt = next((w.box[0] for w in line.words if w.box[0] >= run[2]), None)
+                text = " ".join(value_words[span[0] : span[1]])
                 places.append(Located(value, line.box, run, nxt, "wrapped", text, span))
-                done += count
             return places
     return []
 

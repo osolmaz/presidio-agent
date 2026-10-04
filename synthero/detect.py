@@ -54,7 +54,7 @@ TIME = re.compile(r"\d{1,2}:\d{2}(:\d{2})?")
 
 
 def is_amount(text: str) -> bool:
-    """A money amount or a number with a unit word ("146,50 EUR", "3.450 Bits", "18,50").
+    """A money amount, a percentage, or a number with a unit word ("146,50 EUR", "19%", "3.450 Bits").
 
     Amounts are not personal data and must stay consistent with the totals, so they are
     never replaced, whatever the model says.
@@ -62,7 +62,8 @@ def is_amount(text: str) -> bool:
     t = text.strip()
     with_unit = re.fullmatch(r"[-+]?\d[\d.,]*\s*(EUR|€|[A-Z][a-z]+)", t) is not None
     decimal = re.fullmatch(r"[-+]?(€\s*)?\d{1,3}([.]\d{3})*,\d{2}(\s*(EUR|€))?", t) is not None
-    return with_unit or decimal
+    percent = re.fullmatch(r"[-+]?\d[\d.,]*\s*%", t) is not None
+    return with_unit or decimal or percent
 
 
 @dataclass(frozen=True)

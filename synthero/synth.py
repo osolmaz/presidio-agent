@@ -202,8 +202,9 @@ def _edit_value(
     done: list[Place] = []
     total = len(" ".join(p.printed for p in places if p.words is not None).split())
     for loc in places:
-        text = part_of(new, loc.words, total)
-        out, area = render.replace_words(out, scan, loc.line_box, loc.run_box, loc.printed, text, loc.next_x, style)
+        text = loc.before + part_of(new, loc.words, total) + loc.after
+        old = loc.before + loc.printed + loc.after
+        out, area = render.replace_words(out, scan, loc.line_box, loc.run_box, old, text, loc.next_x, style)
         place: Place = {"box": list(loc.run_box)}
         if read is not None:
             place["read_back_ok"] = match.contains(read(out.crop(area)), text)
@@ -296,6 +297,8 @@ def analysis_to_json(vals: list[Value], locs: list[list[Located]]) -> dict[str, 
                     "how": p.how,
                     "printed": p.printed,
                     "words": list(p.words) if p.words else None,
+                    "before": p.before,
+                    "after": p.after,
                 }
                 for p in ps
             ]
