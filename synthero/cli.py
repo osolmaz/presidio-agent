@@ -1,6 +1,6 @@
 """Make synthetic copies of a scanned document with new personal data.
 
-    python3 -m fakescan SCAN.png [--n 3] [--out /dev/shm/fake-scan/out] [--seed 1]
+    python3 -m synthero SCAN.png [--n 3] [--out /dev/shm/synthero/out] [--seed 1]
 
 The model finds every text line and the exact PII spans in it (type and owner).
 Code invents consistent new values per owner and type, replaces only the span
@@ -144,8 +144,8 @@ def main():
     ap.add_argument("scan")
     ap.add_argument("--n", type=int, default=3)
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--out", default="/dev/shm/fake-scan/out")
-    ap.add_argument("--private", default="/dev/shm/fake-scan/private",
+    ap.add_argument("--out", default="/dev/shm/synthero/out")
+    ap.add_argument("--private", default="/dev/shm/synthero/private",
                     help="folder for the original text, spans, and old-to-new mappings; never serve or share it")
     ap.add_argument("--no-verify", action="store_true")
     ap.add_argument("--no-leak-check", action="store_true")

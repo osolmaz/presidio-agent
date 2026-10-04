@@ -1,6 +1,6 @@
-"""Build a static comparison page for fake-scan outputs.
+"""Build a static comparison page for synthero outputs.
 
-    python3 -m fakescan.page OUT_DIR
+    python3 -m synthero.page OUT_DIR
 
 Writes OUT_DIR/index.html: for each scan, the original, the found lines (red:
 changed, blue: kept), and every copy with its answer key. Relative links only.
@@ -48,7 +48,7 @@ def build(out):
         sections.append(f"<section><h2>{html.escape(stem)}</h2><div class=row>{''.join(cards)}</div></section>")
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
-<title>fake-scan outputs</title><style>
+<title>synthero outputs</title><style>
 :root {{ --bg:#f6f6f3; --ink:#1d1f22; --muted:#5f6368; --card:#fff; --rule:#ddd; --ok:#1d7a3a; --bad:#b3261e; }}
 @media (prefers-color-scheme: dark) {{ :root {{ --bg:#141517; --ink:#e8e8e6; --muted:#a0a3a8; --card:#1e2023; --rule:#33363a; --ok:#6fd08c; --bad:#ff8a80; }} }}
 body {{ margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, sans-serif; padding:24px 16px 64px; }}
@@ -63,7 +63,7 @@ table {{ border-collapse:collapse; font-size:11.5px; width:100%; }}
 td, th {{ border-top:1px solid var(--rule); padding:3px 4px; text-align:left; vertical-align:top; word-break:break-all; }}
 .ok {{ color:var(--ok); }} .bad {{ color:var(--bad); }}
 </style></head><body>
-<h1>fake-scan outputs</h1>
+<h1>synthero outputs</h1>
 <p>Each copy changes only the found fields, inside their own boxes; every other pixel is the original scan.
 Click an image for full size. Files live in RAM on isengard and disappear at reboot.</p>
 {''.join(sections)}
@@ -73,4 +73,4 @@ Click an image for full size. Files live in RAM on isengard and disappear at reb
 
 
 if __name__ == "__main__":
-    print("wrote", build(sys.argv[1] if len(sys.argv) > 1 else "/dev/shm/fake-scan/out"))
+    print("wrote", build(sys.argv[1] if len(sys.argv) > 1 else "/dev/shm/synthero/out"))

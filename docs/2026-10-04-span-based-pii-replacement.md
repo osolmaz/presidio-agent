@@ -2,14 +2,14 @@
 date: 2026-10-04
 author: Onur Solmaz <2453968+osolmaz@users.noreply.github.com>
 title: Span-based PII replacement
-tags: [fake-scan, pii, design, plan]
+tags: [synthero, pii, design, plan]
 ---
 
 # Span-based PII replacement
 
 ## Problem
 
-fake-scan labelled whole lines with one field type, and code then guessed which
+synthero labelled whole lines with one field type, and code then guessed which
 part of the line was the value. The guesses were hard-coded: a list of titles
 (`HERR`, `FRAU`) to keep in front of a name, a `label:` pattern for numbers, and
 a list of common words that the leak check ignores. They failed on a line such

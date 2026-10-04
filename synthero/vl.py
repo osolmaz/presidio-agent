@@ -8,9 +8,9 @@ import urllib.request
 
 from PIL import Image
 
-BASE = os.environ.get("FAKESCAN_VL", "http://127.0.0.1:18930")
+BASE = os.environ.get("SYNTHERO_VL", "http://127.0.0.1:18930")
 # A router such as the Llama app needs the model name; a single-model server ignores it.
-MODEL = os.environ.get("FAKESCAN_MODEL")
+MODEL = os.environ.get("SYNTHERO_MODEL")
 
 
 def _data_url(img: Image.Image) -> str:

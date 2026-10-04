@@ -1,4 +1,4 @@
-# fake-scan
+# synthero
 
 Makes synthetic copies of a scanned invoice or receipt, with new personal data
 and numbers, and writes an answer key for each copy.
@@ -12,10 +12,10 @@ and numbers, and writes an answer key for each copy.
 5. Qwen3-VL reads each new box back to check it.
 
 ```sh
-python3 -m fakescan SCAN.png --n 3          # outputs go to /dev/shm/fake-scan/out
+python3 -m synthero SCAN.png --n 3          # outputs go to /dev/shm/synthero/out
 ```
 
 It needs a vision llama-server (tested: Qwen3.8-27B Q6_K with its mmproj) at
-`FAKESCAN_VL` (default `http://127.0.0.1:18930`).
+`SYNTHERO_VL` (default `http://127.0.0.1:18930`).
 
 Prototype. Outputs are synthetic test data; never commit them.

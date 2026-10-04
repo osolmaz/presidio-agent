@@ -3,3 +3,9 @@ __pycache__/
 *.jpg
 *.pdf
 out/
+.venv/
+*.egg-info/
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
