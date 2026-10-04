@@ -511,3 +511,8 @@ def test_paint_over_spares_the_kept_boxes():
     img = Image.new("RGB", (40, 20), (0, 0, 0))
     synth.paint_over(img, (0, 0, 40, 20), [(10, 5, 20, 15)], (250, 250, 250))
     assert img.getpixel((2, 2)) == (250, 250, 250) and img.getpixel((15, 10)) == (0, 0, 0)
+
+
+def test_punctuation_after_a_value_does_not_trim_its_run():
+    name = locate.read_span("Leon Hartmann,", Value("Leon Hartmann", "person", "c", (0, 0, 1, 1)))
+    assert name is not None and name.start == 0 and name.end == 1.0

@@ -139,7 +139,8 @@ def read_span(reading: str, value: Value) -> Span | None:
     tail = len(raw) - len(raw.rstrip(detect.EDGE_PUNCTUATION))
     before, after = raw[:lead], raw[len(raw) - tail :] if tail else ""
     n = max(1, len(text))
-    return Span(printed, before, after, (a + lead) / n, (b - tail) / n)
+    # The share covers the punctuation too: it is drawn back, so it stays inside the run.
+    return Span(printed, before, after, a / n, b / n)
 
 
 def _trim(page: Page, run: Box, span: Span) -> Box:

@@ -176,7 +176,7 @@ def replace_words(
     # Erase every connected piece of the old value's ink first, also where it reaches
     # outside the box, so no sliver of an old letter survives.
     # Letters are found with a light cut, so the blur halo of a scanned letter goes with it.
-    erase_old_ink(out, gray, value_box, m.paper - 25, ink_h, paper)
+    erase_old_ink(out, gray, value_box, m.paper - 25, ink_h, paper, rim=3 if grain >= 1 else 2)
     out.paste(patch, area[:2], mask)
     read_area = (min(area[0], lx1), min(area[1], ly1), max(area[2], lx2), max(area[3], ly2))
     return out, read_area
@@ -197,7 +197,9 @@ def _component(ink: list[list[bool]], seen: list[list[bool]], start: tuple[int, 
     return comp
 
 
-def erase_old_ink(out: Image.Image, gray: Image.Image, value_box: Box, cut: int, ink_h: int, paper: RGB) -> None:
+def erase_old_ink(
+    out: Image.Image, gray: Image.Image, value_box: Box, cut: int, ink_h: int, paper: RGB, rim: int = 2
+) -> None:
     """Paint paper over all ink connected to the old value, plus its anti-aliased rim.
 
     Table lines touch the value too; a piece much taller or wider than the text is
@@ -228,5 +230,5 @@ def erase_old_ink(out: Image.Image, gray: Image.Image, value_box: Box, cut: int,
             continue  # a table line, not a letter
         for x, y in comp:
             kp[x, y] = 255
-    keep = keep.filter(ImageFilter.MaxFilter(5))
+    keep = keep.filter(ImageFilter.MaxFilter(2 * rim + 1))  # the rim; wider on a scan's JPEG ringing
     out.paste(Image.new("RGB", (w, h), paper), (rx1, ry1), keep)
