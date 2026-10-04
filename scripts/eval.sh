@@ -4,21 +4,23 @@
 #   sim      the digital PDFs turned into scan-like images (scripts/simulate_scan.py)
 #   digital  the digital PDFs as they are (text layer positions)
 #
-#   scripts/eval.sh FIXTURE_DIR [OUT_DIR]      N=copies per document (default 1)
+#   scripts/eval.sh FIXTURE_DIR [OUT_DIR] [PRIVATE_DIR]      N=copies per document (default 1)
 #
-# Each set gets OUT_DIR/SET/index.html; analysis and mappings go to OUT_DIR/private/SET,
-# which must never be served. The summary of every run is appended to OUT_DIR/summary.txt.
+# Each set gets OUT_DIR/SET/index.html. Analysis and mappings go to PRIVATE_DIR/SET
+# (default: OUT_DIR.private, beside OUT_DIR so serving OUT_DIR never serves them).
+# The summary of every run is appended to OUT_DIR/summary.txt.
 set -u
 fixtures=${1:?usage: scripts/eval.sh FIXTURE_DIR [OUT_DIR]}
 out=${2:-/dev/shm/synthero/eval}
+private=${3:-$out.private}
 n=${N:-1}
 here=$(cd "$(dirname "$0")" && pwd)
 mkdir -p "$out/sim-input"
 
 run() {  # SET PDF
   echo "== $1 $(basename "$2")" | tee -a "$out/summary.txt"
-  synthero "$2" --n "$n" --out "$out/$1" --private "$out/private/$1" 2>&1 \
-    | grep -E "^page|^copy|Error" | tee -a "$out/summary.txt"
+  synthero "$2" --n "$n" --out "$out/$1" --private "$private/$1" 2>&1 \
+    | grep --line-buffered -E "^page|^copy|Error" | tee -a "$out/summary.txt"
   python -m synthero.page "$out/$1" > /dev/null
 }
 

@@ -121,11 +121,16 @@ def _ocr_place(page: Page, value: Value, m: match.Match, exact: bool) -> Located
     return None if printed is None else Located(value, line, run, nxt, "ocr+read", printed)
 
 
-def via_pixels(page: Page, value: Value, search_lines: int = 4) -> Located | None:
+def via_pixels(page: Page, value: Value, search_lines: int = 6) -> Located | None:
     _, hy1, _, hy2 = value.hint
     span = search_lines * page.line_h
     region = (0, max(0, hy1 - span), page.gray.width, min(page.gray.height, hy2 + span))
-    lines = geometry.ink_lines(page.gray, region, rule_px=page.rule_px)
+    # Dashes, dots, and specks are not text lines.
+    lines = [
+        b
+        for b in geometry.ink_lines(page.gray, region, rule_px=page.rule_px)
+        if b[3] - b[1] >= page.line_h / 2 and b[2] - b[0] >= page.line_h
+    ]
     for line in sorted(lines, key=lambda b: geometry.centre_distance(b, value.hint))[: 2 * search_lines]:
         for part in geometry.split_tall_box(page.gray, line, page.line_h):
             reading = page.read(_crop(page, part))
@@ -195,13 +200,18 @@ def locate(scan: Image.Image, values: list[Value], ocr_lines: list[Line], read: 
         result.append([p for p in found if p is not None])
     claimed = [p.run_box for places in result for p in places]
     for i, v in enumerate(values):
-        if result[i]:
-            continue
-        near = [_ocr_place(page, v, m, exact=False) for m in match.find_all(v.text, texts, strict=False)]
-        places = [p for p in near if p is not None and not any(overlaps(p.run_box, c) for c in claimed)]
-        if not places:
+        # A value can be printed twice with OCR misreading one copy, so near matches are
+        # tried for every value, on boxes nobody holds yet.
+        near = [m for m in match.find_all(v.text, texts, strict=False) if not _claimed(page, m, claimed)]
+        places = [p for p in (_ocr_place(page, v, m, exact=False) for m in near) if p is not None]
+        if not result[i] and not places:
             one = via_pixels(page, v)
             places = [one] if one is not None and not any(overlaps(one.run_box, c) for c in claimed) else []
         claimed += [p.run_box for p in places]
-        result[i] = places
+        result[i] += places
     return result
+
+
+def _claimed(page: Page, m: match.Match, claimed: list[Box]) -> bool:
+    words = page.lines[m.line].words[m.first_word : m.last_word + 1]
+    return any(overlaps(w.box, c) for w in words for c in claimed)
