@@ -29,12 +29,12 @@ def main() -> None:
     docs = sorted({p.name.split(".p")[0] for p in (root / "digital").glob("*.analysis.json")})
     print("| Document | Digital | Scan | Both | Digital only | Scan only |")
     print("| --- | --- | --- | --- | --- | --- |")
-    totals = [0, 0, 0]
+    distinct = both = 0
     for doc in docs:
         a, b = detected(root / "digital", doc), detected(root / "sim", doc)
-        totals = [totals[0] + len(a | b), totals[1] + len(a & b), totals[2]]
+        distinct, both = distinct + len(a | b), both + len(a & b)
         print(f"| {doc} | {len(a)} | {len(b)} | {len(a & b)} | {len(a - b)} | {len(b - a)} |")
-    print(f"\nagreement: {totals[1]} of {totals[0]} distinct values found in both versions")
+    print(f"\nagreement: {both} of {distinct} distinct values found in both versions")
 
 
 if __name__ == "__main__":
