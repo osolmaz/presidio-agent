@@ -505,3 +505,9 @@ def test_punctuation_in_the_run_is_drawn_back():
 def test_a_reading_that_drops_only_punctuation_keeps_the_value_form():
     span = locate.read_span("12.07", Value("12.07.", "date", "document", (0, 0, 1, 1)))
     assert span is not None and span.printed == "12.07."
+
+
+def test_paint_over_spares_the_kept_boxes():
+    img = Image.new("RGB", (40, 20), (0, 0, 0))
+    synth.paint_over(img, (0, 0, 40, 20), [(10, 5, 20, 15)], 250)
+    assert img.getpixel((2, 2)) == (250, 250, 250) and img.getpixel((15, 10)) == (0, 0, 0)

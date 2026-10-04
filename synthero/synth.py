@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import NotRequired, TypedDict
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from synthero import barcode, fonts, geometry, leak, match, render, values
 from synthero.detect import Value
@@ -154,6 +154,8 @@ def _redraw_barcode(
         return None
     bars = (bars[0], top, bars[2], bottom)
     paper = geometry.paper_level(gray.crop(region))
+    # Paint over the old bars' uneven ends too, everywhere but on the printed number.
+    paint_over(out, barcode.full_extent(gray, bars, h // 2), [run], paper)
     valid = barcode.draw(out, bars, digits, (20, 20, 20), (paper, paper, paper))
     return list(bars), valid
 
@@ -165,6 +167,16 @@ def page_style(scan: Image.Image, locs: list[list[Located]]) -> fonts.Style | No
         m = render.measure(scan, loc.line_box, loc.run_box)
         samples.append((scan.crop(m.value_box), loc.printed, m.ink_h))
     return fonts.page_style(samples) if samples else None
+
+
+def paint_over(out: Image.Image, area: Box, keep: list[Box], paper: int) -> None:
+    """Paper over `area`, except on the boxes in `keep` (values already redrawn)."""
+    mask = Image.new("L", out.size, 0)
+    d = ImageDraw.Draw(mask)
+    d.rectangle((area[0], area[1], area[2] - 1, area[3] - 1), fill=255)
+    for b in keep:
+        d.rectangle((b[0] - 1, b[1] - 1, b[2], b[3]), fill=0)
+    out.paste(Image.new("RGB", out.size, (paper, paper, paper)), (0, 0), mask)
 
 
 def scramble_barcodes(
@@ -184,6 +196,8 @@ def scramble_barcodes(
             continue
         paper = geometry.paper_level(gray.crop(bars))
         x0, y0, x1, _ = bars
+        values = [p.run_box for places in locs for p in places]
+        paint_over(out, barcode.full_extent(gray, bars, line_h // 2), values, paper)
         widths = barcode.pattern_widths(f"{seed}:{x0}:{y0}", x1 - x0)
         barcode.draw_widths(out, bars, widths, (20, 20, 20), (paper, paper, paper))
         count += 1

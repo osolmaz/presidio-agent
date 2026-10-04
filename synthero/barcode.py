@@ -239,6 +239,24 @@ def _bar_rows(gray: Image.Image, x0: int, x1: int, top: int, bottom: int) -> tup
     return t, b + 1
 
 
+def full_extent(gray: Image.Image, bars: Box, limit: int) -> Box:
+    """The bars' box grown up and down while rows still carry bar ink (a skewed barcode's
+    uneven ends), at most `limit` rows each way, plus a pixel to the sides."""
+    x0, y0, x1, y1 = bars
+    px = pixels(gray)
+    cut = ink_threshold(gray)
+
+    def inked(y: int) -> bool:
+        return 0 <= y < gray.height and sum(px[x, y] < cut for x in range(x0, x1)) >= 0.1 * (x1 - x0)
+
+    top, bottom = y0, y1
+    while y0 - top < limit and inked(top - 1):
+        top -= 1
+    while bottom - y1 < limit and inked(bottom):
+        bottom += 1
+    return (max(0, x0 - 1), top, min(gray.width, x1 + 1), bottom)
+
+
 def is_barcode(gray: Image.Image, box: Box, min_share: float = 0.85) -> bool:
     """Bars run from top to bottom: nearly every column is either ink or paper all the way down.
 

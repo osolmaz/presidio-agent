@@ -619,3 +619,12 @@ def test_near_matches_fold_look_alike_letters():
     assert match.close_digits("DE8822Z000009988776", "DE88ZZZ00009988776")
     assert not match.same_digits("DE8822Z000009988776", "DE88ZZZ00009988776")  # the strict rule does not fold
     assert match.folded_digits("O1-IZS B") == "01125"  # "B" alone has no digit: a word, not folded
+
+
+def test_full_extent_follows_uneven_bar_ends():
+    img = Image.new("L", (200, 100), 255)
+    d = ImageDraw.Draw(img)
+    for i in range(20):
+        d.rectangle((10 + 6 * i, 30 - i // 5, 12 + 6 * i, 60 + i // 5), fill=0)  # skewed ends
+    assert barcode.full_extent(img, (10, 34, 127, 57), limit=10) == (9, 27, 128, 64)
+    assert barcode.full_extent(img, (10, 34, 127, 57), limit=2)[1] == 32
