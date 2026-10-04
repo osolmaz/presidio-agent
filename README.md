@@ -63,7 +63,9 @@ Use a copy only when its leak check passed.
 ## Limits
 
 - Detection recall depends on the model. A missed value is neither edited nor
-  searched for. Check `STEM.pN.boxes.png`.
+  searched for. On the eval fixture, the values found on a scan and on its digital
+  twin agreed 85% of the time (`scripts/eval_consistency.py`). Check
+  `STEM.pN.boxes.png`.
 - QR codes are not handled yet.
 - The redraw uses common Linux fonts. A typeface that is not like one of them
   will look different.
@@ -75,6 +77,9 @@ Use a copy only when its leak check passed.
 `scripts/eval.sh FIXTURE_DIR` runs every PDF in a folder in three sets: the real
 scans, the digital PDFs turned into scan-like images (`scripts/simulate_scan.py`),
 and the digital PDFs as they are. Each set gets its own comparison page.
+`scripts/eval_table.py` summarises the public keys, and
+`scripts/eval_consistency.py` compares detection between scans and their digital
+twins. Results: [docs](docs/2026-10-05-documents-pdfs-and-the-harness.md#results).
 
 ## Development
 

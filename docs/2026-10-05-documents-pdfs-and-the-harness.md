@@ -56,6 +56,15 @@ synth            one replacer per document copy (same identity on every page)
 | Barcodes beside a changed number are redrawn as Code 128 of it; every other barcode is scrambled | The bars kept encoding the old number. The fixture's bars are about 2 px per module, too blurred to decode, so their content cannot be checked and is treated as personal. |
 | Documents, not pages | A person must have the same new name on every page. |
 | Digital PDFs through their text layer | The text layer gives exact words and boxes, so no OCR guessing is needed. |
+| A one-digit correction needs six digits; an amount or a percentage is never a value | `0000` was "corrected" to the tax rate `0,00%`. |
+| Near matches fold look-alike letters inside codes (Z/2, O/0, I/1, S/5, B/8, G/6) | A creditor ID with `ZZZ` was read as `22Z` and could not be located. |
+| Bare years are not values | A year alone identifies no one, and the date shifter rightly left it unchanged. |
+| Readings split at `|`; a run glued to the next word is trimmed at a blank column | Tesseract read `4194|Datum:` as one word, and `Datum:` was erased. |
+| Punctuation printed in a run is drawn back; a reading that differs only in punctuation keeps the model's form | A comma after a name was lost; `12.07.` read as `12.07` was no date and stayed. |
+| Wrapped values take their text from the model, never from OCR | OCR read `DE68` as `DF68.`, which broke the new IBAN's country code. |
+| Fonts are sized by the letters' core rows and lose score per unit of width stretch | Skew and blur made regular fonts too wide, so stretched narrow fonts won. |
+| Patches take the paper's colour; old letters are erased with their blur halo | Gray boxes on tinted paper, and faint ghosts of the old letters. |
+| Unchanged values fail the leak check | A date form the shifter did not know stayed unchanged but excused itself as a "new" value. |
 
 ## Eval
 
@@ -86,4 +95,87 @@ fixture's fonts closely, so the gain is unclear.
 
 ## Results
 
-To be filled in after the eval.
+Model: `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` through the Llama app on
+khazaddum (RTX 3080 Laptop, 16 GB; about 14.7 GB used). Tesseract 5.3.4,
+poppler, one copy per document.
+
+### Development runs
+
+Each run found failures that changed the design; every failure in one run was
+fixed before the next.
+
+| Run | Code | Documents passed | Failures |
+| --- | --- | --- | --- |
+| A | `19a8bf0` | 22 of 24 | a bare year left unchanged; a creditor ID read with `ZZZ` as `22Z` |
+| B | `f63e93a` | 24 of 24 | none by the checks; by eye: a label erased beside a glued OCR word, a lost comma, a wrapped IBAN that took OCR's misread country code, condensed fonts on scans |
+| C | `3af6ec1` | stopped | `12.07.` read without its dot; uneven ends of skewed barcodes |
+| D | `1111797` | 24 of 24 | by eye: gray patches on tinted paper, a faint halo of old letters |
+
+### Final run
+
+Run D, 36 pages: every detected value was located, edited, and read back, and
+every page passed the leak check.
+
+| Set | Document | Pages | Values | Located | Edited | Read back | Barcodes scrambled | Leak check |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| real | drucker | 3 | 46 | 46 | 46 | 46 | 3 | passed |
+| real | gutschein_reiseadapter | 1 | 22 | 22 | 22 | 22 | 0 | passed |
+| sim | beleg | 1 | 10 | 10 | 10 | 10 | 0 | passed |
+| sim | coworking_juli | 1 | 8 | 8 | 8 | 8 | 0 | passed |
+| sim | einnahme1_1 | 1 | 15 | 15 | 15 | 15 | 0 | passed |
+| sim | einnahme1_2 | 1 | 10 | 10 | 10 | 10 | 0 | passed |
+| sim | einnahme2 | 1 | 9 | 9 | 9 | 9 | 0 | passed |
+| sim | erstattung_gesamt | 2 | 24 | 24 | 24 | 24 | 0 | passed |
+| sim | rechnung_lautsprecher | 1 | 8 | 8 | 8 | 8 | 0 | passed |
+| sim | telekom_1 | 3 | 17 | 17 | 17 | 17 | 0 | passed |
+| sim | telekom_2 | 3 | 19 | 19 | 19 | 19 | 0 | passed |
+| sim | ueberweisungseingang_ausland_09.07.2026 | 1 | 14 | 14 | 14 | 14 | 0 | passed |
+| sim | umsatzdetails_medienbeitrag_20260731 | 1 | 8 | 8 | 8 | 8 | 0 | passed |
+| digital | beleg | 1 | 9 | 9 | 9 | 9 | 0 | passed |
+| digital | coworking_juli | 1 | 10 | 10 | 10 | 10 | 0 | passed |
+| digital | einnahme1_1 | 1 | 11 | 11 | 11 | 11 | 0 | passed |
+| digital | einnahme1_2 | 1 | 10 | 10 | 10 | 10 | 0 | passed |
+| digital | einnahme2 | 1 | 9 | 9 | 9 | 9 | 0 | passed |
+| digital | erstattung_gesamt | 2 | 21 | 21 | 21 | 21 | 0 | passed |
+| digital | rechnung_lautsprecher | 1 | 11 | 11 | 11 | 11 | 0 | passed |
+| digital | telekom_1 | 3 | 17 | 17 | 17 | 17 | 0 | passed |
+| digital | telekom_2 | 3 | 21 | 21 | 21 | 21 | 0 | passed |
+| digital | ueberweisungseingang_ausland_09.07.2026 | 1 | 12 | 12 | 12 | 12 | 0 | passed |
+| digital | umsatzdetails_medienbeitrag_20260731 | 1 | 8 | 8 | 8 | 8 | 0 | passed |
+
+The copies were then made again from run D's cached analyses with the final code
+(`b23b1a2`, which only changes how patches are painted): see below.
+
+### Detection consistency
+
+The leak check can only search for values that were detected. To estimate
+detection recall, `scripts/eval_consistency.py` compares the values found on each
+simulated scan with those found on its digital twin; both show the same content.
+
+| Document | Digital | Scan | Both | Digital only | Scan only |
+| --- | --- | --- | --- | --- | --- |
+| beleg | 9 | 10 | 9 | 0 | 1 |
+| coworking_juli | 10 | 8 | 7 | 3 | 1 |
+| einnahme1_1 | 11 | 15 | 11 | 0 | 4 |
+| einnahme1_2 | 10 | 10 | 10 | 0 | 0 |
+| einnahme2 | 8 | 8 | 8 | 0 | 0 |
+| erstattung_gesamt | 20 | 22 | 19 | 1 | 3 |
+| rechnung_lautsprecher | 8 | 8 | 8 | 0 | 0 |
+| telekom_1 | 13 | 13 | 13 | 0 | 0 |
+| telekom_2 | 17 | 15 | 15 | 2 | 0 |
+| ueberweisungseingang_ausland_09.07.2026 | 12 | 14 | 10 | 2 | 4 |
+| umsatzdetails_medienbeitrag_20260731 | 8 | 8 | 8 | 0 | 0 |
+
+agreement: 118 of 139 distinct values found in both versions
+
+About 85% agreement. Part of the difference is policy, not reading: on one
+version the model lists the business's own e-mail, invoice number, or a bank
+reference, and on the other it does not. Part is a real miss, such as the invoice
+number in a title. This is the weakest link: a value the model never lists is
+neither replaced nor searched for.
+
+### Not done
+
+- Qwen-Image crop editing, see [Qwen-Image](#qwen-image).
+- QR codes.
+- A third detection pass on enlarged page tiles, to raise recall on small text.
