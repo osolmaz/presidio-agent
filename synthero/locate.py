@@ -133,6 +133,8 @@ def read_span(reading: str, value: Value) -> Span | None:
     printed = raw.strip(detect.EDGE_PUNCTUATION)
     if not printed or detect.is_amount(printed):
         return None
+    if match.norm(printed) == match.norm(value.text):
+        printed = value.text  # the same letters and digits: the model's reading keeps "12.07." a date
     lead = len(raw) - len(raw.lstrip(detect.EDGE_PUNCTUATION))
     tail = len(raw) - len(raw.rstrip(detect.EDGE_PUNCTUATION))
     before, after = raw[:lead], raw[len(raw) - tail :] if tail else ""

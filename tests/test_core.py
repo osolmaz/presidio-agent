@@ -500,3 +500,8 @@ def test_punctuation_in_the_run_is_drawn_back():
     new = copy.key["pages"][0]["changes"][0]["new"]
     assert not new.endswith(",")  # the key holds the value; the comma is only drawn
     assert reads  # the edit was read back
+
+
+def test_a_reading_that_drops_only_punctuation_keeps_the_value_form():
+    span = locate.read_span("12.07", Value("12.07.", "date", "document", (0, 0, 1, 1)))
+    assert span is not None and span.printed == "12.07."
