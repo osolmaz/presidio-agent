@@ -100,13 +100,21 @@ def printed_text(v: Value, places: list[Located]) -> str:
     return max(texts, key=texts.count) if texts else v.text
 
 
-def _redraw_barcode(out: Image.Image, scan: Image.Image, run: Box, new: str) -> tuple[list[int], bool] | None:
+def page_line_height(locs: list[list[Located]]) -> int:
+    """The median height of the page's located values: the line height for barcode tests."""
+    heights = sorted(p.run_box[3] - p.run_box[1] for places in locs for p in places)
+    return heights[len(heights) // 2] if heights else 12
+
+
+def _redraw_barcode(
+    out: Image.Image, scan: Image.Image, run: Box, new: str, line_h: int
+) -> tuple[list[int], bool] | None:
     """Replace a barcode beside a changed number with one that encodes the new number."""
     digits = match.digits(new)
     if len(digits) < 8 or len(digits) != len(match.digits(new.replace(" ", ""))):
         return None
     gray = scan.convert("L")
-    h = max(4, run[3] - run[1])
+    h = max(4, line_h)
     width = run[2] - run[0]
     region = (
         max(0, run[0] - width),
@@ -145,8 +153,7 @@ def scramble_barcodes(
     A barcode that was not redrawn for a changed number may still encode personal data
     (an invoice or customer number), and a scan rarely resolves it well enough to tell.
     """
-    heights = sorted(p.run_box[3] - p.run_box[1] for places in locs for p in places)
-    line_h = heights[len(heights) // 2] if heights else 12
+    line_h = page_line_height(locs)
     gray = scan.convert("L")
     done = [(b[0], b[1], b[2], b[3]) for b in redrawn]
     count = 0
@@ -162,7 +169,13 @@ def scramble_barcodes(
 
 
 def _edit_value(
-    out: Image.Image, scan: Image.Image, new: str, places: list[Located], read: Reader | None, style: fonts.Style | None
+    out: Image.Image,
+    scan: Image.Image,
+    new: str,
+    places: list[Located],
+    read: Reader | None,
+    style: fonts.Style | None,
+    line_h: int,
 ) -> tuple[Image.Image, list[Place]]:
     done: list[Place] = []
     for loc in places:
@@ -170,7 +183,8 @@ def _edit_value(
         place: Place = {"box": list(loc.run_box)}
         if read is not None:
             place["read_back_ok"] = match.contains(read(out.crop(area)), new)
-        bars = _redraw_barcode(out, scan, loc.run_box, new) if loc.value.type in BARCODE_TYPES else None
+        is_number = loc.value.type in BARCODE_TYPES
+        bars = _redraw_barcode(out, scan, loc.run_box, new, line_h) if is_number else None
         if bars is not None:
             place["barcode"], place["barcode_valid"] = bars
         done.append(place)
@@ -215,7 +229,7 @@ def _copy_page(
         new = repl.replace(old, v.type, v.owner)
         edits: list[Place] = []
         if new != old:
-            out, edits = _edit_value(out, scan, new, places, read, style)
+            out, edits = _edit_value(out, scan, new, places, read, style, page_line_height(locs))
         ok = bool(edits) and all(p.get("read_back_ok", True) for p in edits)
         public.append(
             {"type": v.type, "owner": v.owner, "new": new, "located": bool(places), "places": edits, "read_back_ok": ok}

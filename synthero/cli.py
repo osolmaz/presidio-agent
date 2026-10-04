@@ -62,7 +62,7 @@ def debug_boxes(scan: Image.Image, locs: list[list[Located]], path: str) -> None
     img.save(path)
 
 
-def summary(i: int, key: synth.Key) -> str:
+def summary(i: int, key: synth.Key, verified: bool = True) -> str:
     changes = [c for p in key["pages"] for c in p["changes"]]
     edited = [c for c in changes if c["places"]]
     ok = sum(c["read_back_ok"] for c in edited)
@@ -70,7 +70,8 @@ def summary(i: int, key: synth.Key) -> str:
     leaked = sorted({t for lc in checks for t in lc["leaked_types"]})
     verdict = "" if not checks else ("leak check passed" if not leaked else f"LEAK of {leaked}")
     bars = sum(p["barcodes_scrambled"] for p in key["pages"])
-    return f"copy {i}: {len(edited)} values replaced, {ok} read back correctly, {bars} barcodes scrambled, {verdict}"
+    readback = f"{ok} read back correctly" if verified else "read-back skipped"
+    return f"copy {i}: {len(edited)} values replaced, {readback}, {bars} barcodes scrambled, {verdict}"
 
 
 def main() -> None:
@@ -119,7 +120,7 @@ def main() -> None:
         copy.images[0].save(f"{base}.pdf", save_all=True, append_images=copy.images[1:])
         _save(f"{base}.json", copy.key)
         _save(os.path.join(a.private, f"{stem}.copy-{i + 1}.private.json"), copy.private_key)
-        print(summary(i + 1, copy.key), flush=True)
+        print(summary(i + 1, copy.key, verified=not a.no_verify), flush=True)
 
 
 if __name__ == "__main__":
