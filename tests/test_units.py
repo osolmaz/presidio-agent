@@ -416,3 +416,54 @@ def test_amounts_are_never_values():
     hint = (0, 0, 1, 1)
     values = [Value("146,50 EUR", "id", "d", hint), Value("146,50", "card", "d", hint), Value("1357", "id", "d", hint)]
     assert detect.normalise(values) == [Value("1357", "id", "d", hint)]
+
+
+def _bars(img: Image.Image, x0: int, top: int, bottom: int, count: int = 25) -> None:
+    d = ImageDraw.Draw(img)
+    for i in range(count):
+        d.rectangle((x0 + 6 * i, top, x0 + 6 * i + 2, bottom), fill=0)
+
+
+def test_bar_rows_stop_at_the_digits_and_tolerate_small_damage():
+    img = Image.new("L", (300, 100), 255)
+    _bars(img, 10, 30, 49)
+    d = ImageDraw.Draw(img)
+    d.rectangle((10, 52, 160, 60), fill=0)  # the printed number under the bars
+    d.rectangle((10, 35, 22, 35), fill=0)  # a speck across two gaps: still a bar row (2 of 150 columns differ)
+    assert barcode._bar_rows(img, 10, 160, 25, 62) == (30, 50)
+    d.rectangle((10, 31, 40, 31), fill=0)  # a long smear: 15 of 150 columns differ, still >= 85% the same
+    assert barcode._bar_rows(img, 10, 160, 25, 62) == (30, 50)
+    d.rectangle((10, 30, 100, 30), fill=0)  # most of the top row smeared: not a bar row
+    assert barcode._bar_rows(img, 10, 160, 25, 62) == (31, 50)
+
+
+def test_is_barcode_threshold():
+    img = Image.new("L", (200, 60), 255)
+    _bars(img, 0, 10, 49, count=20)  # columns 0..116
+    assert barcode.is_barcode(img, (0, 10, 117, 50))
+    d = ImageDraw.Draw(img)
+    d.rectangle((3, 10, 5, 29), fill=0)  # gaps half filled in 3 of every 6 columns...
+    d.rectangle((9, 10, 11, 29), fill=0)
+    assert barcode.is_barcode(img, (0, 10, 117, 50))  # ...in two places only: 6 of 117 columns
+    for i in range(20):
+        d.rectangle((6 * i + 3, 10, 6 * i + 5, 29), fill=0)  # every gap half ink: half the columns
+    assert not barcode.is_barcode(img, (0, 10, 117, 50))
+    assert barcode.is_barcode(img, (0, 10, 117, 50), min_share=0.45)
+
+
+def test_find_all_splits_side_by_side_codes_only_at_wide_gaps():
+    img = Image.new("L", (400, 100), 255)
+    _bars(img, 10, 20, 49)  # 10..156
+    _bars(img, 190, 20, 49)  # gap of 34 px
+    assert [b[0] for b in barcode.find_all(img, line_height=10)] == [10, 190]  # 34 > 3 * 10
+    assert [b[0] for b in barcode.find_all(img, line_height=12)] == [10]  # 34 < 36: one block
+    assert barcode.find_all(img, line_height=16) == []  # 30 rows < 2 * 16
+
+
+def test_find_value_run_lengths_and_threshold():
+    words = [["AB", "CD", "EF", "GH"]]
+    assert match.find_value("ABCDEF", words) == match.Match(0, 0, 2, 1.0)  # a 1-word value spans up to 3 words
+    assert match.find_value("ABCDEFGH", words, min_score=0.9) is None  # would need 4
+    assert match.find_value("AB CDEFGH", words) == match.Match(0, 0, 3, 1.0)  # a 2-word value spans up to 4
+    assert match.find_value("ABCDEFX", [["ABCDEFG"]], min_score=6 / 7) == match.Match(0, 0, 0, 6 / 7)
+    assert match.find_all("ABC", [["ABC", "ABC", "ABC"]]) == [match.Match(0, i, i, 1.0) for i in range(3)]
