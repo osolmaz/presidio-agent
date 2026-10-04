@@ -109,12 +109,13 @@ fixed before the next.
 | A | `19a8bf0` | 22 of 24 | a bare year left unchanged; a creditor ID read with `ZZZ` as `22Z` |
 | B | `f63e93a` | 24 of 24 | none by the checks; by eye: a label erased beside a glued OCR word, a lost comma, a wrapped IBAN that took OCR's misread country code, condensed fonts on scans |
 | C | `3af6ec1` | stopped | `12.07.` read without its dot; uneven ends of skewed barcodes |
-| D | `1111797` | 24 of 24 | by eye: gray patches on tinted paper, a faint halo of old letters |
+| D | `1111797` | 24 of 24 | by eye: gray patches on tinted paper, a faint halo of old letters, a comma's trim that cut into a name |
+| E | `c326d0a` | 24 of 24 | final run, below |
 
 ### Final run
 
-Run D, 36 pages: every detected value was located, edited, and read back, and
-every page passed the leak check.
+Run E on `c326d0a`, 36 pages, one copy per document: every detected value (349)
+was located, edited, and read back, and every page passed the leak check.
 
 | Set | Document | Pages | Values | Located | Edited | Read back | Barcodes scrambled | Leak check |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -142,9 +143,6 @@ every page passed the leak check.
 | digital | telekom_2 | 3 | 21 | 21 | 21 | 21 | 0 | passed |
 | digital | ueberweisungseingang_ausland_09.07.2026 | 1 | 12 | 12 | 12 | 12 | 0 | passed |
 | digital | umsatzdetails_medienbeitrag_20260731 | 1 | 8 | 8 | 8 | 8 | 0 | passed |
-
-The copies were then made again from run D's cached analyses with the final code
-(`b23b1a2`, which only changes how patches are painted): see below.
 
 ### Detection consistency
 
