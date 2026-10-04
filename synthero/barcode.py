@@ -9,6 +9,7 @@ the same width. `decode_widths` checks the drawn bars in the tests.
 
 from __future__ import annotations
 
+import random
 from collections.abc import Sequence
 
 from PIL import Image, ImageDraw
@@ -218,15 +219,42 @@ def find_bars(gray: Image.Image, region: Box, line_height: int, min_runs: int = 
     return (cols[0], top, cols[-1] + 1, bottom) if cols else None
 
 
-def draw(img: Image.Image, bars: Box, digits: str, ink: tuple[int, int, int], paper: tuple[int, int, int]) -> None:
-    """Paint over `bars` and draw `digits` as Code 128 across the same width."""
+def pattern_widths(digits: str, modules: int) -> list[int]:
+    """A bar pattern of `modules` modules derived from the digits: looks like bars, encodes nothing.
+
+    Used when a valid Code 128 of the new number does not fit the old barcode's width.
+    """
+    rng = random.Random(digits)
+    widths: list[int] = []
+    while sum(widths) < modules:
+        widths.append(rng.choice((1, 1, 2, 2, 3, 4)))
+    widths[-1] -= sum(widths) - modules
+    if widths[-1] <= 0:
+        widths.pop()
+    if len(widths) % 2 == 0:  # end on a bar: merge the last space into the bar before it
+        last = widths.pop()
+        widths[-1] += last
+    return widths
+
+
+def draw(img: Image.Image, bars: Box, digits: str, ink: tuple[int, int, int], paper: tuple[int, int, int]) -> bool:
+    """Paint over `bars` and draw new bars across the same width.
+
+    Returns True when the bars are a valid Code 128 of `digits`, False when that does not
+    fit (modules under one pixel) and a pattern that encodes nothing was drawn instead.
+    """
     x0, y0, x1, y1 = bars
     widths = widths_for(digits)
+    valid = (x1 - x0) >= sum(widths)
+    if not valid:
+        widths = pattern_widths(digits, x1 - x0)
     module = (x1 - x0) / sum(widths)
     d = ImageDraw.Draw(img)
     d.rectangle((x0, y0, x1 - 1, y1 - 1), fill=paper)
     pos = 0
     for i, w in enumerate(widths):
         if i % 2 == 0:
-            d.rectangle((x0 + round(pos * module), y0, x0 + round((pos + w) * module) - 1, y1 - 1), fill=ink)
+            left, right = x0 + round(pos * module), x0 + round((pos + w) * module) - 1
+            d.rectangle((left, y0, max(left, right), y1 - 1), fill=ink)
         pos += w
+    return valid

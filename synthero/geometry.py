@@ -73,39 +73,60 @@ def bands(flags: list[bool], min_gap: int = 1) -> list[tuple[int, int]]:
     return out
 
 
-def ink_lines(gray: Image.Image, region: Box | None = None, gap_factor: float = 3.0) -> list[Box]:
+def _vertical_runs_removed(column: list[bool], rule_px: int) -> list[bool]:
+    """A column of ink flags with every unbroken vertical run of `rule_px` or more cleared."""
+    out = list(column)
+    start = None
+    for i, v in enumerate([*column, False]):
+        if v and start is None:
+            start = i
+        elif not v and start is not None:
+            if i - start >= rule_px:
+                out[start:i] = [False] * (i - start)
+            start = None
+    return out
+
+
+def text_mask(gray: Image.Image, region: Box, rule_px: int = 36) -> list[list[bool]]:
+    """Ink flags of `region` as mask[y][x], without frames, cell lines, and barcode bars.
+
+    A vertical run of ink longer than `rule_px` (three lines by default) is never a letter,
+    and a row whose ink runs unbroken over half the width is a horizontal rule.
+    """
+    x0, y0, x1, y1 = region
+    cut = ink_threshold(gray)
+    px = pixels(gray)
+    cols = [_vertical_runs_removed([px[x, y] < cut for y in range(y0, y1)], rule_px) for x in range(x0, x1)]
+    mask = [[cols[x][y] for x in range(x1 - x0)] for y in range(y1 - y0)]
+    for row in mask:
+        if longest_true_run(row) > 0.5 * len(row):
+            row[:] = [False] * len(row)
+    return mask
+
+
+def longest_true_run(flags: list[bool]) -> int:
+    best = run = 0
+    for f in flags:
+        run = run + 1 if f else 0
+        best = max(best, run)
+    return best
+
+
+def ink_lines(gray: Image.Image, region: Box | None = None, gap_factor: float = 3.0, rule_px: int = 36) -> list[Box]:
     """Text lines in `region` (the whole page by default), found from rows of ink.
 
     Rows with ink form bands; a band is split sideways where a blank gap is wider
-    than `gap_factor` times the band height (separate columns on one row). Long
-    straight rules are ignored, so table lines do not merge text lines.
+    than `gap_factor` times the band height (separate columns on one row). Rules,
+    frames, and barcode bars are ignored (`text_mask`), so they do not merge lines.
     """
     x0, y0, x1, y1 = region or (0, 0, gray.width, gray.height)
-    cut = ink_threshold(gray)
-    px = pixels(gray)
-    width = x1 - x0
-
-    def is_ink(x: int, y: int) -> bool:
-        return px[x, y] < cut
-
-    def longest_run(y: int) -> int:
-        best = run = 0
-        for x in range(x0, x1):
-            run = run + 1 if is_ink(x, y) else 0
-            best = max(best, run)
-        return best
-
-    rows = []
-    for y in range(y0, y1):
-        inked = any(is_ink(x, y) for x in range(x0, x1))
-        rows.append(inked and longest_run(y) <= 0.5 * width)
+    mask = text_mask(gray, (x0, y0, x1, y1), rule_px)
     lines: list[Box] = []
-    for top, bottom in bands(rows, min_gap=2):
-        ty, by = y0 + top, y0 + bottom
-        height = max(1, by - ty)
-        cols = [any(is_ink(x, y) for y in range(ty, by)) for x in range(x0, x1)]
+    for top, bottom in bands([any(row) for row in mask], min_gap=2):
+        height = max(1, bottom - top)
+        cols = [any(mask[y][x] for y in range(top, bottom)) for x in range(x1 - x0)]
         for left, right in bands(cols, min_gap=max(3, int(gap_factor * height))):
-            lines.append((x0 + left, ty, x0 + right, by))
+            lines.append((x0 + left, y0 + top, x0 + right, y0 + bottom))
     return lines
 
 
@@ -135,12 +156,17 @@ def has_ink(gray: Image.Image, box: Box, min_dark: int = 8) -> bool:
     return sum(1 for v in gray_values(crop) if v < cut) >= min_dark
 
 
-def word_boxes(gray: Image.Image, line: Box) -> list[Box]:
-    """Split one text line into word boxes at blank gaps wider than about a third of its height."""
+def word_boxes(gray: Image.Image, line: Box, rule_px: int = 36) -> list[Box]:
+    """Split one text line into word boxes at blank gaps wider than about a third of its height.
+
+    Frames and cell lines that cross the line are not words.
+    """
     x0, y0, x1, y1 = line
-    cut = ink_threshold(gray)
-    px = pixels(gray)
-    cols = [any(px[x, y] < cut for y in range(y0, y1)) for x in range(x0, x1)]
+    pad = rule_px  # look above and below, so a frame crossing the line is seen as long
+    outer = (x0, max(0, y0 - pad), x1, min(gray.height, y1 + pad))
+    mask = text_mask(gray, outer, rule_px)
+    rows = range(y0 - outer[1], y1 - outer[1])
+    cols = [any(mask[y][x] for y in rows) for x in range(x1 - x0)]
     gap = max(3, int((y1 - y0) * 0.35))
     return [(x0 + a, y0, x0 + b, y1) for a, b in bands(cols, min_gap=gap)]
 

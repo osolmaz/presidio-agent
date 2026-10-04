@@ -64,10 +64,18 @@ def parse_objects(text: str) -> list[object]:
     return out
 
 
+def upscaled(img: Image.Image, min_height: int = 64) -> Image.Image:
+    """A small crop enlarged so its text is about as tall as the model reads best."""
+    if img.height >= min_height or img.height == 0:
+        return img
+    scale = min_height / img.height
+    return img.resize((round(img.width * scale), min_height), Image.Resampling.LANCZOS)
+
+
 def read_text(img: Image.Image) -> str:
     """Read the text in a small crop."""
-    prompt = "Read the text in this image exactly. Answer with only the text."
-    return chat([image_part(img), text_part(prompt)], max_tokens=200).strip()
+    prompt = "Read the text in this image exactly, character by character. Answer with only the text."
+    return chat([image_part(upscaled(img)), text_part(prompt)], max_tokens=200).strip()
 
 
 def read_page(img: Image.Image) -> str:

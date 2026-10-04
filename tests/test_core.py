@@ -108,16 +108,8 @@ def test_locate_falls_back_to_pixels_when_ocr_text_is_garbage():
     ocr_lines = [ocr.Line((ocr.Word("een", (20, 45, 140, 60)),))]
     truth = {"HERR": (20, 20), "LEON HARTMANN": (20, 45), "BEISPIELALLEE 42": (20, 70)}
 
-    gray = img.convert("L")
     value = Value("LEON HARTMANN", "person", "customer", (20, 40, 200, 65))
-    lines = geometry.ink_lines(gray)
-
-    def reader(crop: Image.Image) -> str:  # a fake model: names the line drawn at the crop's position
-        for box in lines:
-            if crop.size == (box[2] - box[0], box[3] - box[1]):
-                y = box[1]
-                return min(truth, key=lambda t: abs(truth[t][1] + 3 - y))
-        return ""
+    reader = ink_width_reader(list(truth))
 
     places = locate.locate(img, [value], ocr_lines, reader)[0]
     assert len(places) == 1 and places[0].how == "pixels"
@@ -210,23 +202,28 @@ def test_via_ocr_splits_a_tall_box_and_keeps_only_the_part_that_reads_back():
     gray = img.convert("L")
     rows = geometry.ink_lines(gray)
     merged = (15, 15, 250, 60)  # Tesseract merged the two lines into one tall box
-    ocr_lines = [ocr.Line((ocr.Word("BEISPIELALLEE", merged), ocr.Word("42", merged)))]
+    normal = [ocr.Line((ocr.Word("Rechnung", (300, 20 + 20 * i, 360, 31 + 20 * i)),)) for i in range(4)]
+    ocr_lines = [ocr.Line((ocr.Word("BEISPIELALLEE", merged), ocr.Word("42", merged))), *normal]
 
     texts = {rows[0][1]: "LEON HARTMANN", rows[1][1]: "BEISPIELALLEE 42"}
 
     value = Value("BEISPIELALLEE 42", "street", "customer", (0, 0, 600, 300))
-    found = locate.via_ocr(locate.Page(gray, img, ocr_lines, 14, lambda crop: _reading(crop, img, texts)), value)
+    found = locate.locate(img, [value], ocr_lines, ink_width_reader(list(texts.values())))[0]
     assert len(found) == 1
     assert abs(found[0].run_box[1] - rows[1][1]) <= 2 and found[0].run_box[3] <= 60
 
 
-def _reading(crop: Image.Image, img: Image.Image, texts: dict[int, str]) -> str:
-    """A fake model: find the crop on the page and name the line printed there."""
-    for y, text in texts.items():
-        for top in range(y - 3, y + 4):
-            if crop.tobytes() == img.crop((15, top, 15 + crop.width, top + crop.height)).tobytes():
-                return text
-    return ""
+def ink_width_reader(texts: list[str]) -> locate.Reader:
+    """A fake model for pages drawn by `page`: names a one-line crop by the width of its ink."""
+    widths = {t: page([(0, 0, t)]).convert("L").point(lambda v: 255 if v < 128 else 0).getbbox() for t in texts}
+
+    def read(crop: Image.Image) -> str:
+        box = crop.convert("L").point(lambda v: 255 if v < 128 else 0).getbbox()
+        if box is None or box[3] - box[1] > 20:  # blank, or more than one line
+            return ""
+        return min(texts, key=lambda t: abs((widths[t] or box)[2] - (widths[t] or box)[0] - (box[2] - box[0])))
+
+    return read
 
 
 def test_ocr_groups_rows_and_splits_columns():
@@ -315,17 +312,33 @@ def test_cli_end_to_end_with_fake_model_and_ocr(tmp_path, monkeypatch, capsys):
     assert (out / "scan.boxes.png").exists()
 
 
-def test_ocr_near_miss_is_accepted_only_when_a_second_reading_agrees():
+def test_ocr_near_miss_takes_the_printed_text_from_a_second_reading():
     img = page([(20, 20, "Terminal-ID 66128344")])
     gray = img.convert("L")
     row = geometry.ink_lines(gray)[0]
     label, number = geometry.word_boxes(gray, row)
     lines = [ocr.Line((ocr.Word("Terminal-1D", label), ocr.Word("66128344", number)))]
     value = Value("66128244", "id", "document", (0, 0, 600, 60))  # the model misread one digit
-    agree = locate.via_ocr(locate.Page(gray, img, lines, 14, lambda crop: "66128344"), value)
-    assert [(p.how, p.printed, p.run_box) for p in agree] == [("ocr+read", "66128344", number)]
-    disagree = locate.via_ocr(locate.Page(gray, img, lines, 14, lambda crop: "66128244"), value)
-    assert disagree == []
+    for reading in ("66128344", "66128244", "66128249"):  # agrees with OCR, with the model, with neither
+
+        def read(crop: Image.Image, r: str = reading) -> str:
+            return f"Terminal-ID {r}"
+
+        places = locate.locate(img, [value], lines, read)[0]
+        assert [(p.how, p.printed, p.run_box) for p in places] == [("ocr+read", reading, number)]
+    far = locate.locate(img, [value], lines, lambda crop: "Terminal-ID 99999999")[0]
+    assert far == []
+
+
+def test_a_box_claimed_by_an_exact_match_is_not_taken_by_a_near_one():
+    img = page([(20, 20, "Uhrzeit: 19:10:03 Uhr")])
+    gray = img.convert("L")
+    boxes = geometry.word_boxes(gray, geometry.ink_lines(gray)[0])
+    lines = [ocr.Line(tuple(ocr.Word(t, b) for t, b in zip(["Uhrzeit:", "19:10:03", "Uhr"], boxes, strict=True)))]
+    exact = Value("19:10:03", "time", "document", (0, 0, 600, 60))
+    near = Value("19:10 Uhr", "time", "document", (0, 0, 600, 60))  # printed elsewhere, OCR missed it
+    places = locate.locate(img, [exact, near], lines, lambda crop: "Uhrzeit: 19:10:03 Uhr")
+    assert [p.how for p in places[0]] == ["ocr"] and places[1] == []
 
 
 def test_make_copy_uses_the_printed_text_and_redraws_the_barcode():
@@ -338,7 +351,7 @@ def test_make_copy_uses_the_printed_text_and_redraws_the_barcode():
     loc = locate.Located(value, run, run, None, "ocr+read", "842607130031480842")
     copy = synth.make_copy(img, [value], [[loc]], seed=3, context="", read_page=lambda p: "")
     change = copy.key["changes"][0]
-    assert change["places"][0]["barcode"][1] == 20
+    assert change["places"][0]["barcode"][1] == 20 and change["places"][0]["barcode_valid"]
     assert copy.private_key["changes"][0]["old"] == "842607130031480842"
     new_digits = match.digits(change["new"])
     bars = change["places"][0]["barcode"]

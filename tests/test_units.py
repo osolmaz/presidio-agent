@@ -7,7 +7,7 @@ import random
 import pytest
 from PIL import Image, ImageDraw
 
-from synthero import barcode, detect, geometry, leak, match, values
+from synthero import barcode, detect, geometry, leak, locate, match, values
 from synthero.detect import Value
 
 
@@ -314,3 +314,88 @@ def test_close_digits():
     assert match.close_digits("Keller", "anything")
     assert match.find_value("66128244", [["66128344"]]) is None
     assert match.find_value("66128244", [["66128344"]], strict=False) == match.Match(0, 0, 0, 0.875)
+
+
+# --- geometry: frames and bars -------------------------------------------
+
+
+def test_vertical_runs_removed_clears_only_long_runs():
+    col = [True] * 3 + [False] + [True] * 5 + [False, True]
+    assert geometry._vertical_runs_removed(col, 5) == [True] * 3 + [False] + [False] * 5 + [False, True]
+    assert geometry._vertical_runs_removed(col, 6) == col
+    assert geometry._vertical_runs_removed([True] * 4, 4) == [False] * 4
+
+
+def test_longest_true_run():
+    assert geometry.longest_true_run([True, False, True, True, False]) == 2
+    assert geometry.longest_true_run([]) == 0
+
+
+def test_text_mask_drops_frames_and_rules_but_keeps_letters():
+    img = blank(100, 100)
+    bar(img, (5, 0, 5, 99))  # a frame line down the page
+    bar(img, (0, 50, 99, 50))  # a rule across it
+    bar(img, (20, 20, 30, 29))  # a letter
+    mask = geometry.text_mask(img, (0, 0, 100, 100), rule_px=36)
+    assert not any(row[5] for row in mask)
+    assert not any(mask[50])
+    assert mask[25][25] and sum(map(sum, mask)) == 110  # 11 x 10, rectangles are inclusive
+
+
+def test_lines_and_words_ignore_a_frame_crossing_them():
+    img = blank(200, 120)
+    bar(img, (8, 0, 9, 119))  # the receipt's edge
+    bar(img, (20, 20, 40, 29))
+    bar(img, (50, 20, 70, 29))
+    bar(img, (20, 60, 70, 69))
+    assert geometry.ink_lines(img) == [(20, 20, 71, 30), (20, 60, 71, 70)]
+    assert geometry.word_boxes(img, (0, 20, 200, 30)) == [(20, 20, 41, 30), (50, 20, 71, 30)]
+
+
+def test_a_barcode_too_narrow_for_code128_gets_a_pattern_of_the_same_width():
+    img = Image.new("RGB", (200, 60), "white")
+    assert not barcode.draw(img, (10, 10, 110, 50), "4827103121075820131207202619104", (0, 0, 0), (255, 255, 255))
+    gray = img.convert("L")
+    row = [geometry.pixels(gray)[x, 30] < 128 for x in range(0, 200)]
+    assert row.index(True) == 10 and max(i for i, v in enumerate(row) if v) == 109
+    widths = barcode.pattern_widths("123", 100)
+    assert sum(widths) == 100 and len(widths) % 2 == 1 and min(widths) >= 1
+    assert barcode.pattern_widths("123", 100) == widths and barcode.pattern_widths("124", 100) != widths
+
+
+def test_overlaps():
+    assert locate.overlaps((0, 0, 10, 10), (4, 4, 20, 20))  # 36 of 100
+    assert not locate.overlaps((0, 0, 10, 10), (9, 9, 20, 20))
+    assert not locate.overlaps((0, 0, 10, 10), (10, 0, 20, 10))
+
+
+def test_code128_text_boundaries():
+    assert barcode._text([105, 0, 99]) == "0099"
+    assert barcode._text([105, 100]) == ""
+    assert barcode._text([105, 101]) is None  # FNC/shift codes are not digits
+    assert barcode._text([105, 99, 100, 16, 25]) == "9909"
+    assert barcode._text([105, 100, 15]) is None  # "/" in set B
+    assert barcode._text([105, 100, 26]) is None  # ":" in set B
+    assert barcode._text([104, 16, 25]) == "09"
+    for d in "0123456789":
+        assert barcode.decode_widths(barcode.widths_for("1" + d)) == "1" + d
+        assert barcode.decode_widths(barcode.widths_for("12" + d)) == "12" + d  # odd: last digit in set B
+
+
+def test_find_bars_boundaries():
+    img = Image.new("L", (300, 100), 255)
+    d = ImageDraw.Draw(img)
+    for i in range(20):  # exactly 40 runs per row: 20 bars and the 20 gaps... minus the trailing one
+        d.rectangle((10 + 6 * i, 30, 12 + 6 * i, 49), fill=0)
+    assert barcode.find_bars(img, (0, 0, 300, 100), line_height=10, min_runs=39) == (10, 30, 127, 50)
+    assert barcode.find_bars(img, (0, 0, 300, 100), line_height=10, min_runs=40) is None
+    assert barcode.find_bars(img, (0, 0, 300, 100), line_height=11, min_runs=39) is None  # 20 rows < 22
+    d.rectangle((5, 0, 5, 99), fill=0)  # a frame through the block is not a bar
+    assert barcode.find_bars(img, (0, 0, 300, 100), line_height=10, min_runs=39) == (10, 30, 127, 50)
+
+
+def test_pattern_widths_shape():
+    for n in (1, 2, 7, 50, 171):
+        widths = barcode.pattern_widths("4827", n)
+        assert sum(widths) == n and len(widths) % 2 == 1 and all(w >= 1 for w in widths)
+    assert max(barcode.pattern_widths("4827", 400)) <= 4 + 4

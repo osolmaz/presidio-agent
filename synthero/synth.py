@@ -28,7 +28,8 @@ BARCODE_TYPES = {"id", "card"}
 class Place(TypedDict):
     box: list[int]
     read_back_ok: NotRequired[bool]
-    barcode: NotRequired[list[int]]  # bars redrawn to encode the new value
+    barcode: NotRequired[list[int]]  # bars redrawn beside the new value
+    barcode_valid: NotRequired[bool]  # True: a Code 128 of the new value; False: a pattern that encodes nothing
 
 
 class Change(TypedDict):
@@ -78,7 +79,7 @@ def printed_text(v: Value, places: list[Located]) -> str:
     return max(texts, key=texts.count) if texts else v.text
 
 
-def _redraw_barcode(out: Image.Image, scan: Image.Image, run: Box, new: str) -> list[int] | None:
+def _redraw_barcode(out: Image.Image, scan: Image.Image, run: Box, new: str) -> tuple[list[int], bool] | None:
     """Replace a barcode beside a changed number with one that encodes the new number."""
     digits = match.digits(new)
     if len(digits) < 8 or len(digits) != len(match.digits(new.replace(" ", ""))):
@@ -96,8 +97,8 @@ def _redraw_barcode(out: Image.Image, scan: Image.Image, run: Box, new: str) -> 
     if bars is None:
         return None
     paper = geometry.paper_level(gray.crop(region))
-    barcode.draw(out, bars, digits, (20, 20, 20), (paper, paper, paper))
-    return list(bars)
+    valid = barcode.draw(out, bars, digits, (20, 20, 20), (paper, paper, paper))
+    return list(bars), valid
 
 
 def _edit_value(
@@ -111,7 +112,7 @@ def _edit_value(
             place["read_back_ok"] = match.contains(read(out.crop(area)), new)
         bars = _redraw_barcode(out, scan, loc.run_box, new) if loc.value.type in BARCODE_TYPES else None
         if bars is not None:
-            place["barcode"] = bars
+            place["barcode"], place["barcode_valid"] = bars
         done.append(place)
     return out, done
 
