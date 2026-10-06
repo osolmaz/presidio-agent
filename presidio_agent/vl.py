@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import functools
 import io
 import json
 import os
@@ -11,9 +12,31 @@ import urllib.request
 from PIL import Image
 
 BASE_ENV = "PRESIDIO_AGENT_VL"
-BASE = os.environ.get(BASE_ENV, "http://127.0.0.1:18930")
-# A router such as the Llama app needs the model name; a single-model server ignores it.
-MODEL = os.environ.get("PRESIDIO_AGENT_MODEL")
+BASE = os.environ.get(BASE_ENV, "http://127.0.0.1:8080")  # llama-server's default address
+MODEL_ENV = "PRESIDIO_AGENT_MODEL"
+
+
+def served_model(models: object) -> str | None:
+    """The model a `/v1/models` answer offers: the only one, or the first loaded one of a router."""
+    data = models.get("data") if isinstance(models, dict) else None
+    rows = data if isinstance(data, list) else []
+    entries = [m for m in rows if isinstance(m, dict) and isinstance(m.get("id"), str)]
+    loaded = [m for m in entries if (m.get("status") or {}).get("value", "loaded") == "loaded"]
+    chosen = loaded or entries
+    return str(chosen[0]["id"]) if chosen else None
+
+
+@functools.cache
+def model() -> str | None:
+    """The model to ask for: PRESIDIO_AGENT_MODEL, or else the one the server serves."""
+    if name := os.environ.get(MODEL_ENV):
+        return name
+    try:
+        with urllib.request.urlopen(BASE + "/v1/models", timeout=10) as r:
+            return served_model(json.loads(r.read()))
+    except (OSError, ValueError):
+        return None
+
 
 Part = dict[str, object]
 
@@ -37,8 +60,8 @@ def chat(content: list[Part], max_tokens: int = 4096, timeout: float = 900) -> s
         "max_tokens": max_tokens,
         "chat_template_kwargs": {"enable_thinking": False},
     }
-    if MODEL:
-        body["model"] = MODEL
+    if name := model():
+        body["model"] = name
     req = urllib.request.Request(
         BASE + "/v1/chat/completions", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}
     )

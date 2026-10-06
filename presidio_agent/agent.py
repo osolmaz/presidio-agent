@@ -67,4 +67,4 @@ def run(args: Sequence[str]) -> None:
         )
     os.environ.update(env)
     os.makedirs(os.environ["TAU_HOME"], exist_ok=True)
-    app(args=tau_args(args, vl.MODEL), prog_name="presidio-agent")
+    app(args=tau_args(args, vl.model()), prog_name="presidio-agent")

@@ -38,7 +38,7 @@ You need Python 3.12+ and these programs:
 - a llama.cpp server (`llama-server`) running a vision model with its `--mmproj` projector
 
 ```sh
-pip install "presidio-agent @ git+https://github.com/osolmaz/presidio-agent.git"
+uv tool install git+https://github.com/osolmaz/presidio-agent.git
 ```
 
 The install includes Presidio and the German spaCy model it uses for names. The model it
@@ -47,14 +47,22 @@ which fits a 16 GB GPU.
 
 ## Use
 
-Point presidio-agent at the llama.cpp server and start it:
+Start llama-server with the vision model on its default address, then run:
 
 ```sh
-export PRESIDIO_AGENT_VL=http://127.0.0.1:8080       # the llama.cpp server
-export PRESIDIO_AGENT_MODEL=ternary-bonsai-2-27b      # the model id the server reports
-presidio-agent                                        # interactive session
+presidio-agent
+```
+
+and ask it, for example, to make two synthetic copies of `invoice.pdf`. A one-shot run
+works too:
+
+```sh
 presidio-agent -p "Make two synthetic copies of invoice.pdf."
 ```
+
+presidio-agent asks the server which model it serves. `PRESIDIO_AGENT_VL` points it at a
+server elsewhere, and `PRESIDIO_AGENT_MODEL` picks one model on a router that serves
+several.
 
 The agent runs in Tau, so Tau's options such as `--provider` and `--model` pass through.
 Next to Tau's own tools it has three of its own. `find_personal_values` analyses a
