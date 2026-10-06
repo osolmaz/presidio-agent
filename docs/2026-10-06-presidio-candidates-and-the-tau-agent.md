@@ -48,7 +48,7 @@ sentence in the first-pass prompt asking for the names of the business's manager
 Bonsai list the whole footer instead, down to the shop's phone numbers and bank details. On invoice B (`drucker-3.jpg`) the count went from 9
 values to 41, and a narrower wording either did the same (38) or dropped the director
 (10). The 2-bit model cannot hold that one exception next to the rule that excludes the
-business's details. The original prompt stays, Presidio flags the director's name as a
+business's details. So the original prompt stays. Presidio flags the director's name as a
 person, and the agent's policy accepts the names of staff and managers.
 
 ## Agent
@@ -76,7 +76,7 @@ private folder and Tau's session logs land there with the other private data.
 
 Tau's llama.cpp backend did not see that a llama.cpp model accepts images, so it never
 sent the read tool's page images to the model. Current llama.cpp reports inputs as
-`architecture.input_modalities`, older builds report them only in `/props`, and Tau read
+`architecture.input_modalities` and older builds report them only in `/props`. Tau read
 neither. [huggingface/tau#757](https://github.com/huggingface/tau/pull/757) fixes this,
 and presidio-agent pins Tau to that branch's commit until a release includes it.
 
