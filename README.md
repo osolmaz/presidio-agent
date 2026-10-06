@@ -68,7 +68,29 @@ Next to Tau's own tools, the agent has three of its own. `find_personal_values` 
 a document and `accept_value` adds a value the agent decided is personal, while
 `make_copies` makes the copies and reports how each did in the leak check.
 
-To make copies without the agent, for scripts:
+## Tool approval
+
+Tools that write files or run commands ask before they run. The dialog shows the tool
+and its input, with three choices:
+
+```text
+Allow once                        # run this call and keep asking for the next one
+Allow all tools for this session  # run every tool call in this session without asking
+Deny and stop                     # block the call and tell the agent to stop
+```
+
+Reading tools and presidio-agent's own three tools run without asking, because they
+never change the documents; the own tools write only to the output and private folders.
+`bash`, `write`, `edit`, and any other tool ask. A one-shot run with `-p` has nobody to
+ask, so those calls are blocked there.
+
+`--no-approval` turns the dialog off for one session, and `--approve-read-tools` adds the
+reading tools to it. In a session, `/approval allow` or `/approval ask` changes the
+setting for this and later sessions.
+
+## Copies without the agent
+
+For scripts, the `copy` command runs the fixed flow on its own:
 
 ```sh
 presidio-agent copy invoice.pdf --n 3

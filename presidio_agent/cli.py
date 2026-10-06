@@ -41,7 +41,7 @@ def copy_main(argv: Sequence[str]) -> None:
 
 def agent_main(argv: Sequence[str]) -> None:
     ap = argparse.ArgumentParser(prog="presidio-agent", add_help=False)
-    settings.add_arguments(ap)
+    settings.add_agent_arguments(ap)
     known, rest = ap.parse_known_args(argv)
     agent.run(settings.from_arguments(known), rest)
 

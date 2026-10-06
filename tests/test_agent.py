@@ -290,6 +290,12 @@ def test_setup_registers_the_three_tools(monkeypatch, fakes, tmp_path):
         def register_tool(self, tool):
             self.tools.append(tool)
 
+        def on(self, event, handler):
+            pass
+
+        def register_command(self, name, handler, *, description, usage):
+            pass
+
     api = Api()
     extension.setup(api)
     tools = {t.name: t for t in api.tools}
