@@ -2,15 +2,30 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
+import os
 from typing import Any
 
 import pytest
 import tau_coding.cli
 from PIL import Image
 
-from presidio_agent import agent, candidates, cli, detect, extension, locate, ocr, pipeline, recognizers, source, vl
+from presidio_agent import (
+    agent,
+    candidates,
+    cli,
+    detect,
+    extension,
+    locate,
+    ocr,
+    pipeline,
+    recognizers,
+    settings,
+    source,
+    vl,
+)
 from presidio_agent.candidates import Candidate
 from presidio_agent.detect import Value
 from presidio_agent.locate import Located
@@ -124,6 +139,14 @@ def place(value: Value) -> Located:
 def text_page() -> source.Page:
     words = [ocr.Word(w, (10 + 60 * i, 10, 60 + 60 * i, 30)) for i, w in enumerate(TEXT.split())]
     return source.Page(Image.new("RGB", (600, 200), "white"), [ocr.Line(tuple(words))], "text")
+
+
+@pytest.fixture(autouse=True)
+def default_settings():
+    """Every test starts from the default settings and leaves them so."""
+    settings.use(settings.Settings())
+    yield
+    settings.use(settings.Settings())
 
 
 @pytest.fixture
@@ -257,8 +280,7 @@ def test_argument_readers_fall_back_on_wrong_types():
 
 def test_setup_registers_the_three_tools(monkeypatch, fakes, tmp_path):
     ws, _ = fakes
-    monkeypatch.setenv(extension.OUT_ENV, ws.out)
-    monkeypatch.setenv(extension.PRIVATE_ENV, ws.private)
+    settings.use(settings.Settings(out=ws.out, private=ws.private))
     monkeypatch.setattr(recognizers, "analyzer", lambda: analyze)
 
     class Api:
@@ -282,10 +304,17 @@ def test_setup_registers_the_three_tools(monkeypatch, fakes, tmp_path):
     assert made["copies"][0]["leak_check_passed"] is True
 
 
-def test_workspace_comes_from_the_environment(monkeypatch):
-    monkeypatch.delenv(extension.OUT_ENV, raising=False)
-    monkeypatch.setenv(extension.PRIVATE_ENV, "/tmp/p")
-    assert extension.workspace() == pipeline.Workspace(extension.DEFAULT_OUT, "/tmp/p")
+def test_workspace_comes_from_the_settings():
+    settings.use(settings.Settings(private="/tmp/p"))
+    assert extension.workspace() == pipeline.Workspace(settings.DEFAULT_OUT, "/tmp/p")
+
+
+def test_settings_come_from_the_command_line():
+    ap = argparse.ArgumentParser()
+    settings.add_arguments(ap)
+    assert settings.from_arguments(ap.parse_args([])) == settings.Settings()
+    chosen = settings.from_arguments(ap.parse_args(["--base-url", "http://h:1/", "-m", "x", "--out", "/o"]))
+    assert chosen == settings.Settings(base_url="http://h:1", model="x", out="/o")
 
 
 # --- the launcher ------------------------------------------------------------------
@@ -298,25 +327,16 @@ def test_tau_gets_the_extension_policy_tools_and_llama_cpp():
     assert agent.EXTENSION.exists() and agent.POLICY.exists()
 
 
-def test_the_caller_can_choose_provider_and_model():
+def test_the_caller_can_choose_another_provider():
     assert "--model" not in agent.tau_args([], None)
-    chosen = agent.tau_args(["-m", "other"], "bonsai")
-    assert "bonsai" not in chosen and chosen[-2:] == ["-m", "other"]
     hosted = agent.tau_args(["--provider", "openai"], "bonsai")
     assert "llama.cpp" not in hosted and "bonsai" not in hosted
     assert agent.has_option(["--model=x"], "--model") and not agent.has_option(["--models"], "--model")
 
 
-def test_tau_environment_keeps_sessions_private():
-    env = agent.tau_env({extension.PRIVATE_ENV: "/p"})
-    assert env == {
-        "LLAMA_BASE_URL": vl.BASE,
-        "TAU_HOME": "/p/tau",
-        extension.PRIVATE_ENV: "/p",
-        extension.OUT_ENV: extension.DEFAULT_OUT,
-    }
-    chosen = agent.tau_env({"LLAMA_BASE_URL": "http://x", "TAU_HOME": "/t", extension.OUT_ENV: "/o"})
-    assert chosen["LLAMA_BASE_URL"] == "http://x" and chosen["TAU_HOME"] == "/t" and chosen[extension.OUT_ENV] == "/o"
+def test_tau_gets_the_server_and_keeps_sessions_private():
+    env = agent.tau_env(settings.Settings(base_url="http://x", private="/p"))
+    assert env == {"LLAMA_BASE_URL": "http://x", "TAU_HOME": "/p/tau"}
 
 
 def test_the_served_model_is_found_without_configuration(monkeypatch):
@@ -325,14 +345,10 @@ def test_the_served_model_is_found_without_configuration(monkeypatch):
     assert vl.served_model(router) == "b"
     assert vl.served_model({"data": [{"id": "a", "status": {"value": "unloaded"}}]}) == "a"
     assert vl.served_model({"data": [{"name": "x"}, "y"]}) is None and vl.served_model([]) is None
-    monkeypatch.setenv(vl.MODEL_ENV, "chosen")
-    vl.model.cache_clear()
+    settings.use(settings.Settings(model="chosen"))
     assert vl.model() == "chosen"
-    monkeypatch.delenv(vl.MODEL_ENV)
-    monkeypatch.setattr(vl, "BASE", "http://127.0.0.1:9")
-    vl.model.cache_clear()
+    settings.use(settings.Settings(base_url="http://127.0.0.1:9"))
     assert vl.model() is None
-    vl.model.cache_clear()
 
 
 def test_the_launcher_stops_without_a_server(monkeypatch):
@@ -345,10 +361,12 @@ def test_the_launcher_stops_without_a_server(monkeypatch):
 def test_the_launcher_hands_over_to_tau(monkeypatch, tmp_path):
     started: dict[str, Any] = {}
     monkeypatch.setattr(agent, "server_problem", lambda base: None)
-    monkeypatch.setenv(extension.PRIVATE_ENV, str(tmp_path / "private"))
-    monkeypatch.delenv("TAU_HOME", raising=False)
-
+    monkeypatch.setenv("LLAMA_BASE_URL", "unset")  # restored after the test
+    monkeypatch.setenv("TAU_HOME", "unset")
     monkeypatch.setattr(tau_coding.cli, "app", lambda args, prog_name: started.update(args=args, prog=prog_name))
-    cli.main(["-p", "hi"])
-    assert started["prog"] == "presidio-agent" and started["args"][-2:] == ["-p", "hi"]
+    private = str(tmp_path / "private")
+    cli.main(["--base-url", "http://h:1", "-m", "bonsai", "--private", private, "--thinking", "low", "-p", "hi"])
+    assert started["prog"] == "presidio-agent"
+    assert started["args"][4:] == ["--provider", "llama.cpp", "--model", "bonsai", "--thinking", "low", "-p", "hi"]
+    assert settings.current().private == private and os.environ["LLAMA_BASE_URL"] == "http://h:1"
     assert (tmp_path / "private" / "tau").is_dir()

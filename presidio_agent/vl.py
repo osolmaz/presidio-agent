@@ -6,14 +6,11 @@ import base64
 import functools
 import io
 import json
-import os
 import urllib.request
 
 from PIL import Image
 
-BASE_ENV = "PRESIDIO_AGENT_VL"
-BASE = os.environ.get(BASE_ENV, "http://127.0.0.1:8080")  # llama-server's default address
-MODEL_ENV = "PRESIDIO_AGENT_MODEL"
+from presidio_agent import settings
 
 
 def served_model(models: object) -> str | None:
@@ -27,15 +24,18 @@ def served_model(models: object) -> str | None:
 
 
 @functools.cache
-def model() -> str | None:
-    """The model to ask for: PRESIDIO_AGENT_MODEL, or else the one the server serves."""
-    if name := os.environ.get(MODEL_ENV):
-        return name
+def _served(base_url: str) -> str | None:
     try:
-        with urllib.request.urlopen(BASE + "/v1/models", timeout=10) as r:
+        with urllib.request.urlopen(base_url + "/v1/models", timeout=10) as r:
             return served_model(json.loads(r.read()))
     except (OSError, ValueError):
         return None
+
+
+def model() -> str | None:
+    """The model to ask for: the one chosen with --model, or else the one the server serves."""
+    chosen = settings.current()
+    return chosen.model or _served(chosen.base_url)
 
 
 Part = dict[str, object]
@@ -63,7 +63,9 @@ def chat(content: list[Part], max_tokens: int = 4096, timeout: float = 900) -> s
     if name := model():
         body["model"] = name
     req = urllib.request.Request(
-        BASE + "/v1/chat/completions", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}
+        settings.current().base_url + "/v1/chat/completions",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=timeout) as r:
         answer = json.load(r)["choices"][0]["message"]["content"]

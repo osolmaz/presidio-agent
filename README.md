@@ -60,13 +60,12 @@ works too:
 presidio-agent -p "Make two synthetic copies of invoice.pdf."
 ```
 
-presidio-agent asks the server which model it serves. `PRESIDIO_AGENT_VL` points it at a
-server elsewhere, and `PRESIDIO_AGENT_MODEL` picks one model on a router that serves
-several.
+presidio-agent asks the server which model it serves. `--base-url` points it at a server
+elsewhere, and `--model` picks one model on a router that serves several. Every other
+option goes to Tau.
 
-The agent runs in Tau, so Tau's options such as `--provider` and `--model` pass through.
-Next to Tau's own tools it has three of its own. `find_personal_values` analyses a
-document and `accept_value` adds a value the agent decided is personal, while
+Next to Tau's own tools, the agent has three of its own. `find_personal_values` analyses
+a document and `accept_value` adds a value the agent decided is personal, while
 `make_copies` makes the copies and reports how each did in the leak check.
 
 To make copies without the agent, for scripts:
@@ -79,7 +78,7 @@ python -m presidio_agent.page /dev/shm/presidio-agent/out   # a page to compare 
 
 ## Output
 
-Copies go to `--out`, by default `/dev/shm/presidio-agent/out` in RAM:
+Copies go to the folder given with `--out`, by default `/dev/shm/presidio-agent/out` in RAM:
 
 - `STEM.copy-K.pdf` and `STEM.copy-K.pN.png`, the copy as one PDF and page by page. A copy
   of a digital PDF is also an image, without a text layer.

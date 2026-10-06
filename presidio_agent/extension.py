@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections.abc import Callable, Mapping
 from typing import Protocol
 
@@ -17,14 +16,9 @@ from tau_agent.messages import TextContent
 from tau_agent.tools import AgentTool, AgentToolResult, ToolCancellationToken, ToolUpdateCallback
 from tau_agent.types import JSONValue
 
-from presidio_agent import detect, recognizers
+from presidio_agent import detect, recognizers, settings
 from presidio_agent.pipeline import Workspace
 from presidio_agent.tools import Report, Session
-
-OUT_ENV = "PRESIDIO_AGENT_OUT"
-PRIVATE_ENV = "PRESIDIO_AGENT_PRIVATE"
-DEFAULT_OUT = "/dev/shm/presidio-agent/out"
-DEFAULT_PRIVATE = "/dev/shm/presidio-agent/private"
 
 Run = Callable[[Mapping[str, JSONValue]], Report]
 
@@ -33,7 +27,8 @@ PATH: dict[str, JSONValue] = {"type": "string", "description": "path of the docu
 
 
 def workspace() -> Workspace:
-    return Workspace(os.environ.get(OUT_ENV, DEFAULT_OUT), os.environ.get(PRIVATE_ENV, DEFAULT_PRIVATE))
+    chosen = settings.current()
+    return Workspace(chosen.out, chosen.private)
 
 
 def _int(arguments: Mapping[str, JSONValue], name: str, default: int) -> int:
