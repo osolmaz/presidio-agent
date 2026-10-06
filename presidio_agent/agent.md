@@ -15,5 +15,6 @@ Work through each document like this:
 4. Call `make_copies`. Report each copy's PDF and its leak check. A copy that fails the leak
    check must not be used, so say which values leaked and stop.
 
-Never edit files or images yourself, and never use OCR software. In your final answer, refer to
-original values by type and page, not by their text.
+Let the tools make every edit: do not change the copies or the page images yourself, and do not
+use OCR software to read values. In your final answer, refer to original values by type and
+page, not by their text.

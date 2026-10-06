@@ -16,13 +16,13 @@ uvx slophammer-py@0.5.0 check .
 
 CI runs the same gates; do not finish with any of them red. The tests need the
 Liberation fonts (`fonts-liberation`). They use fakes for the model server and
-OCR, and skip the Presidio test when the `presidio` extra is not installed.
+OCR; one test runs the real Presidio analyzer.
 
 ## Rules
 
-- Python 3.12+. The runtime dependencies are Pillow and Tau (`tau-ai`, pinned to a
-  commit); Presidio is the optional `presidio` extra and is imported only in
-  `recognizers.py`. Tesseract and the llama.cpp server are external programs
+- Python 3.12+. The runtime dependencies are Pillow, Tau (`tau-ai`, pinned to a
+  commit), and Presidio with the German spaCy model; Presidio is imported only in
+  `recognizers.py`, which loads it on first use. Tesseract and the llama.cpp server are external programs
   reached through `ocr.py` and `vl.py`.
 - Strict mypy and Ruff `ANN`: annotate every function. No `Any`; narrow model
   answers and cached JSON at the boundary (`detect.parse`,
@@ -33,9 +33,9 @@ OCR, and skip the Presidio test when the `presidio` extra is not installed.
   arguments and are tested with fakes.
 - Presidio only proposes. Its candidates go to the vision model and the agent;
   nothing is edited because Presidio flagged it.
-- The agent decides; it never edits pixels or files. Its tools (`tools.py`,
-  exposed to Tau by `extension.py`) run the fixed flow in `pipeline.py`, and the
-  extension blocks every other Tau tool except `read`.
+- The agent decides; the edits come from its tools (`tools.py`, exposed to Tau by
+  `extension.py`), which run the fixed flow in `pipeline.py`. Tau's own tools stay
+  available, and the policy (`agent.md`) keeps the agent from editing copies itself.
 - Never trust OCR text as a value. The model reads values; OCR and pixels only
   give positions.
 - Privacy: the public answer key holds new values only. Old values, the
