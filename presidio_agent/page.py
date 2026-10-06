@@ -1,6 +1,6 @@
-"""Build a static comparison page for synthero outputs.
+"""Build a static comparison page for presidio-agent outputs.
 
-    python3 -m synthero.page OUT_DIR
+    python3 -m presidio_agent.page OUT_DIR
 
 Writes OUT_DIR/index.html: for each document page, the original, the located values,
 and every copy with its answer key; one row per page. Relative links only.
@@ -14,7 +14,7 @@ import json
 import os
 import sys
 
-from synthero.synth import Change, Key, PageKey
+from presidio_agent.synth import Change, Key, PageKey
 
 
 def figure(src: str, title: str, body: str = "") -> str:
@@ -91,7 +91,7 @@ def build(out: str) -> str:
         sections.append(f"<section><h2>{html.escape(stem)}</h2><p>PDF:{pdfs}</p>{rows}</section>")
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
-<title>synthero outputs</title><style>
+<title>presidio-agent outputs</title><style>
 :root {{ --bg:#f6f6f3; --ink:#1d1f22; --muted:#5f6368; --card:#fff; --rule:#ddd;
   --ok:#1d7a3a; --bad:#b3261e; }}
 @media (prefers-color-scheme: dark) {{ :root {{ --bg:#141517; --ink:#e8e8e6; --muted:#a0a3a8; --card:#1e2023;
@@ -112,7 +112,7 @@ td, th {{ border-top:1px solid var(--rule); padding:3px 4px; text-align:left; ve
   word-break:break-all; }}
 .ok {{ color:var(--ok); }} .bad {{ color:var(--bad); }}
 </style></head><body>
-<h1>synthero outputs</h1>
+<h1>presidio-agent outputs</h1>
 <p>Each copy changes only the personal values, inside their own boxes; every other pixel is the original.
 Click an image for full size. Files live in RAM and disappear at reboot.</p>
 {"".join(sections)}
@@ -124,4 +124,4 @@ Click an image for full size. Files live in RAM and disappear at reboot.</p>
 
 
 if __name__ == "__main__":
-    print("wrote", build(sys.argv[1] if len(sys.argv) > 1 else "/dev/shm/synthero/out"))
+    print("wrote", build(sys.argv[1] if len(sys.argv) > 1 else "/dev/shm/presidio-agent/out"))

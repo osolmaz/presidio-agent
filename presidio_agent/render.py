@@ -13,8 +13,8 @@ from dataclasses import dataclass
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
-from synthero import fonts
-from synthero.geometry import Box, gray_values, paper_colour, paper_level, pixels
+from presidio_agent import fonts
+from presidio_agent.geometry import Box, gray_values, paper_colour, paper_level, pixels
 
 RGB = tuple[int, int, int]
 

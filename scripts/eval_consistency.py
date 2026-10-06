@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare what the model detected on each simulated scan with its digital twin.
 
-    python scripts/eval_consistency.py /dev/shm/synthero/eval.private
+    python scripts/eval_consistency.py /dev/shm/presidio-agent/eval.private
 
 Both show the same content, so a value found in one and not the other estimates the
 detection recall the leak check cannot see. Reads the private analyses; prints counts
@@ -25,7 +25,7 @@ def detected(folder: Path, doc: str) -> set[str]:
 
 
 def main() -> None:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else "/dev/shm/synthero/eval.private")
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else "/dev/shm/presidio-agent/eval.private")
     docs = sorted({p.name.split(".p")[0] for p in (root / "digital").glob("*.analysis.json")})
     print("| Document | Digital | Scan | Both | Digital only | Scan only |")
     print("| --- | --- | --- | --- | --- | --- |")

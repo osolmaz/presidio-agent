@@ -2,14 +2,14 @@
 date: 2026-10-05
 author: Onur Solmaz <2453968+osolmaz@users.noreply.github.com>
 title: Value-first PII detection with OCR positions
-tags: [synthero, pii, ocr, design, plan]
+tags: [presidio-agent, pii, ocr, design, plan]
 ---
 
 # Value-first PII detection with OCR positions
 
 ## Current state
 
-synthero (formerly fake-scan) makes synthetic copies of scanned invoices and
+presidio-agent (formerly fake-scan) makes synthetic copies of scanned invoices and
 receipts. Tesseract gives word positions, Bonsai marks PII spans in the OCR
 text, code invents consistent values, the renderer redraws only the changed
 words, and the leak check fails any copy where an original value survives.
@@ -58,7 +58,7 @@ On page 2 of `drucker.pdf`, two failures came from the OCR, not the model:
   generation, with unit tests that need no model and no Tesseract.
 - Model and Tesseract calls behind small interfaces, so tests can replace them.
 - `ruff`, `mypy`, `pytest` with coverage, and Slophammer (`slophammer-py`) in CI.
-- One command, `synthero SCAN.png`, with outputs in RAM by default and the
+- One command, `presidio-agent SCAN.png`, with outputs in RAM by default and the
   private folder never served.
 
 ## Test
@@ -69,7 +69,7 @@ is drawn on its own line, no label is lost, and every copy passes the leak check
 
 ## Results
 
-Bonsai (Ternary Bonsai 2 27B, PQ2_0) through the Llama app on khazaddum, one
+Bonsai (Ternary Bonsai 2 27B, PQ2_0) through the Llama app on a laptop with a 16 GB GPU, one
 16 GB GPU.
 
 - The value-first design worked as planned on page 2 of `drucker.pdf`: the bold

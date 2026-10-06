@@ -14,10 +14,10 @@ from typing import NotRequired, TypedDict
 
 from PIL import Image, ImageDraw
 
-from synthero import barcode, fonts, geometry, leak, match, render, values
-from synthero.detect import Value
-from synthero.geometry import Box
-from synthero.locate import Located, Reader, overlaps
+from presidio_agent import barcode, fonts, geometry, leak, match, render, values
+from presidio_agent.detect import Value
+from presidio_agent.geometry import Box
+from presidio_agent.locate import Located, Reader, overlaps
 
 PageReader = Callable[[Image.Image], str]
 

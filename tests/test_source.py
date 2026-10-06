@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
-from synthero import barcode, fonts, ocr, source
+from presidio_agent import barcode, fonts, ocr, source
 
 XHTML = """<html xmlns="http://www.w3.org/1999/xhtml"><body><doc>
 <page width="595" height="842"><flow><block><line>

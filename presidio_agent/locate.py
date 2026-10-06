@@ -25,10 +25,10 @@ from dataclasses import dataclass
 
 from PIL import Image
 
-from synthero import detect, geometry, match
-from synthero.detect import Value
-from synthero.geometry import Box
-from synthero.ocr import Line
+from presidio_agent import detect, geometry, match
+from presidio_agent.detect import Value
+from presidio_agent.geometry import Box
+from presidio_agent.ocr import Line
 
 Reader = Callable[[Image.Image], str]
 LineOcr = Callable[[Image.Image], list[Line]]  # OCR of one line crop: words with boxes in the crop

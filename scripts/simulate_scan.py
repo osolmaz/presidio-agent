@@ -5,7 +5,7 @@
 
 Each page is rendered at 300 dpi and then degraded like an office scan: down-sampled
 to --dpi, a slight skew, a warm paper tint, blur, sensor noise, and JPEG compression.
-The result has no text layer, so synthero treats it as a scan (Tesseract positions).
+The result has no text layer, so presidio-agent treats it as a scan (Tesseract positions).
 Writes OUT_DIR/STEM.pdf with one scanned image per page.
 """
 

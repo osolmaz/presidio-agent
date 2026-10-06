@@ -10,9 +10,10 @@ import urllib.request
 
 from PIL import Image
 
-BASE = os.environ.get("SYNTHERO_VL", "http://127.0.0.1:18930")
+BASE_ENV = "PRESIDIO_AGENT_VL"
+BASE = os.environ.get(BASE_ENV, "http://127.0.0.1:18930")
 # A router such as the Llama app needs the model name; a single-model server ignores it.
-MODEL = os.environ.get("SYNTHERO_MODEL")
+MODEL = os.environ.get("PRESIDIO_AGENT_MODEL")
 
 Part = dict[str, object]
 
