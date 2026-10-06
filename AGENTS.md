@@ -5,14 +5,18 @@ These instructions apply to this repository.
 ## Commands To Run Before Finishing
 
 ```sh
-ruff format --check .
-ruff check .
-mypy presidio_agent tests
-pytest --cov=presidio_agent --cov-fail-under=85
-python scripts/check-mutation.py --min-kill-rate 85
+uv sync
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy presidio_agent tests
+uv run pytest --cov=presidio_agent --cov-fail-under=85
+uv run python scripts/check-mutation.py --min-kill-rate 85
 uvx slophammer-py@0.5.0 dry .
 uvx slophammer-py@0.5.0 check .
 ```
+
+Use uv for everything: `uv add` and `uv remove` change dependencies and `uv.lock`
+together, and `uv run` runs commands in the project environment.
 
 CI runs the same gates; do not finish with any of them red. The tests need the
 Liberation fonts (`fonts-liberation`). They use fakes for the model server and

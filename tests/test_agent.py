@@ -319,6 +319,22 @@ def test_tau_environment_keeps_sessions_private():
     assert chosen["LLAMA_BASE_URL"] == "http://x" and chosen["TAU_HOME"] == "/t" and chosen[extension.OUT_ENV] == "/o"
 
 
+def test_the_served_model_is_found_without_configuration(monkeypatch):
+    assert vl.served_model({"data": [{"id": "bonsai"}]}) == "bonsai"
+    router = {"data": [{"id": "a", "status": {"value": "unloaded"}}, {"id": "b", "status": {"value": "loaded"}}]}
+    assert vl.served_model(router) == "b"
+    assert vl.served_model({"data": [{"id": "a", "status": {"value": "unloaded"}}]}) == "a"
+    assert vl.served_model({"data": [{"name": "x"}, "y"]}) is None and vl.served_model([]) is None
+    monkeypatch.setenv(vl.MODEL_ENV, "chosen")
+    vl.model.cache_clear()
+    assert vl.model() == "chosen"
+    monkeypatch.delenv(vl.MODEL_ENV)
+    monkeypatch.setattr(vl, "BASE", "http://127.0.0.1:9")
+    vl.model.cache_clear()
+    assert vl.model() is None
+    vl.model.cache_clear()
+
+
 def test_the_launcher_stops_without_a_server(monkeypatch):
     assert agent.server_problem("http://127.0.0.1:9", timeout=1)
     monkeypatch.setattr(agent, "server_problem", lambda base: "connection refused")

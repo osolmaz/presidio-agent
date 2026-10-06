@@ -13,22 +13,21 @@ jobs:
         python: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python }}
-      - uses: astral-sh/setup-uv@v7
       - name: Fonts used to redraw values, and poppler for PDFs
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation fonts-dejavu-core poppler-utils
-      - run: python -m pip install -e ".[dev]"
-      - run: ruff format --check .
-      - run: ruff check .
-      - run: mypy presidio_agent tests
-      - run: pytest --cov=presidio_agent --cov-fail-under=85
+      - run: uv sync --locked
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy presidio_agent tests
+      - run: uv run pytest --cov=presidio_agent --cov-fail-under=85
       - name: Mutation testing behind the kill-rate floor
-        run: python scripts/check-mutation.py --min-kill-rate 85
+        run: uv run python scripts/check-mutation.py --min-kill-rate 85
       - name: Audit dependencies
         run: |
-          python -m pip freeze --exclude-editable > /tmp/requirements.txt
+          uv export --locked --no-dev --no-emit-project --no-hashes > /tmp/requirements.txt
           uvx pip-audit -r /tmp/requirements.txt --disable-pip --no-deps
       - run: uvx slophammer-py@0.5.0 dry .
       - run: uvx slophammer-py@0.5.0 check .
