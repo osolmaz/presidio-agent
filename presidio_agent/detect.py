@@ -21,10 +21,9 @@ PROMPT = """This is a scanned invoice or receipt. List every piece of personal d
 transaction identifier that must change in a new synthetic copy: people's names, the customer's
 address (the postal code and city together, as printed), e-mail, phone, customer, contract, order,
 receipt, trace, terminal, and approval numbers, card numbers (payment, loyalty, customer cards) and
-IBANs, the number printed under a barcode, dates and times. People are always personal data: also
-list people named as the business's managers or owners, such as "Geschäftsführer: Julia Kern". Do not
-list the business's own name, address, phone, tax numbers, or bank details, amounts or prices, product
-or article numbers, or labels such as "Datum:" or "Kd-Nr.:". List a value once even if it is printed
+IBANs, the number printed under a barcode, dates and times. Do not list
+the business's own name, address, phone, tax numbers, or bank details, amounts or prices, product or
+article numbers, or labels such as "Datum:" or "Kd-Nr.:". List a value once even if it is printed
 several times.
 
 For each piece give:
@@ -45,8 +44,8 @@ only to notice what may be missing. List every piece of personal data about a cu
 member, or transaction identifier, that is printed on the page but missing above, in the same JSON
 format (text as printed in the image, type, owner, bbox_2d). Still do not list the business's own
 name, address, e-mail, web site, phone, tax, register, or bank details, amounts, prices, points or
-bonus balances, product or article numbers, or labels; people's names are always personal. Answer with
-only a JSON array, [] if nothing is missing.
+bonus balances, product or article numbers, or labels. Answer with only a JSON array, [] if nothing
+is missing.
 {flagged}
 OCR text:
 {ocr}"""
