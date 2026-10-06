@@ -1,7 +1,7 @@
 """The fixed de-identification flow for one document, shared by the CLI and the agent's tools.
 
 1. Each page becomes an image with word boxes (`source`).
-2. Presidio proposes candidates from the page's text (`candidates`, optional).
+2. Presidio proposes candidates from the page's text (`candidates`).
 3. The vision model reads the personal values, checking Presidio's candidates (`detect`).
 4. Each value is located wherever it is printed (`locate`).
 5. Each copy redraws every located value with a consistent invented one, reads every

@@ -2,8 +2,8 @@
 
 Presidio ships its generic recognizers (IBAN, e-mail, phone, card, date) for English
 only, so they are registered again for German next to Presidio's German ones and the
-German spaCy name recognizer. Optional: without the `presidio` extra, `analyzer()`
-returns None and the vision model works alone.
+German spaCy name recognizer. Building the analyzer loads spaCy, so it happens once,
+on first use.
 """
 
 from __future__ import annotations
@@ -17,26 +17,24 @@ SPACY_MODEL = "de_core_news_md"
 
 
 @functools.cache
-def analyzer() -> Analyze | None:
-    """Presidio's analyzer as a function from text to spans, built once; None without Presidio."""
-    try:
-        from presidio_analyzer import AnalyzerEngine, RecognizerRegistry  # noqa: PLC0415 -- Presidio is optional
-        from presidio_analyzer.nlp_engine import NlpEngineProvider  # noqa: PLC0415 -- Presidio is optional
-        from presidio_analyzer.predefined_recognizers import (  # noqa: PLC0415 -- Presidio is optional
-            CreditCardRecognizer,
-            DateRecognizer,
-            DeHealthInsuranceRecognizer,
-            DeIdCardRecognizer,
-            DePassportRecognizer,
-            DeSocialSecurityRecognizer,
-            DeTaxIdRecognizer,
-            EmailRecognizer,
-            IbanRecognizer,
-            PhoneRecognizer,
-            SpacyRecognizer,
-        )
-    except ImportError:
-        return None
+def analyzer() -> Analyze:
+    """Presidio's analyzer as a function from text to spans, built once."""
+    from presidio_analyzer import AnalyzerEngine, RecognizerRegistry  # noqa: PLC0415 -- loads spaCy on first use
+    from presidio_analyzer.nlp_engine import NlpEngineProvider  # noqa: PLC0415 -- loads spaCy on first use
+    from presidio_analyzer.predefined_recognizers import (  # noqa: PLC0415 -- loads spaCy on first use
+        CreditCardRecognizer,
+        DateRecognizer,
+        DeHealthInsuranceRecognizer,
+        DeIdCardRecognizer,
+        DePassportRecognizer,
+        DeSocialSecurityRecognizer,
+        DeTaxIdRecognizer,
+        EmailRecognizer,
+        IbanRecognizer,
+        PhoneRecognizer,
+        SpacyRecognizer,
+    )
+
     nlp = NlpEngineProvider(
         nlp_configuration={"nlp_engine_name": "spacy", "models": [{"lang_code": LANGUAGE, "model_name": SPACY_MODEL}]}
     ).create_engine()

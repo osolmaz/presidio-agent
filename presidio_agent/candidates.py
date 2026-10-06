@@ -71,7 +71,7 @@ def from_spans(text: str, spans: Iterable[Span]) -> list[Candidate]:
 
 
 def find(text: str, analyze: Analyze | None) -> list[Candidate]:
-    """Presidio's candidates for one page's text, or none when Presidio is not installed."""
+    """Presidio's candidates for one page's text, or none when Presidio is turned off."""
     return from_spans(text, analyze(text)) if analyze is not None and text.strip() else []
 
 

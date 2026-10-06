@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 import tau_coding.cli
 from PIL import Image
-from tau_coding.extensions import ToolCallHookEvent
 
 from presidio_agent import agent, candidates, cli, detect, extension, locate, ocr, pipeline, recognizers, source, vl
 from presidio_agent.candidates import Candidate
@@ -83,8 +82,6 @@ def test_unconfirmed_candidates_are_those_no_value_covers():
 
 def test_recognizers_find_german_invoice_candidates():
     analyze = recognizers.analyzer()
-    if analyze is None:
-        pytest.skip("Presidio is not installed")
     flagged = {(c.text, c.entity) for c in candidates.find(TEXT, analyze)}
     assert ("DE89 3704 0044 0532 0130 00", "IBAN_CODE") in flagged
     assert ("Markus Weber", "PERSON") in flagged
@@ -267,18 +264,13 @@ def test_setup_registers_the_three_tools(monkeypatch, fakes, tmp_path):
     class Api:
         def __init__(self) -> None:
             self.tools: list[Any] = []
-            self.hooks: dict[str, Any] = {}
 
         def register_tool(self, tool):
             self.tools.append(tool)
 
-        def on(self, event, handler):
-            self.hooks[event] = handler
-
     api = Api()
     extension.setup(api)
     tools = {t.name: t for t in api.tools}
-    assert api.hooks["tool_call"] is extension.only_allowed_tools
     assert list(tools) == ["find_personal_values", "accept_value", "make_copies"]
     path = str(tmp_path / "invoice.pdf")
     found = json.loads(asyncio.run(tools["find_personal_values"].execute("1", {"path": path})).text)
@@ -288,14 +280,6 @@ def test_setup_registers_the_three_tools(monkeypatch, fakes, tmp_path):
     assert accepted["located"] is True
     made = json.loads(asyncio.run(tools["make_copies"].execute("3", {"path": path, "n": 1})).text)
     assert made["copies"][0]["leak_check_passed"] is True
-
-
-def test_only_reading_and_the_agent_tools_are_allowed():
-    blocked = extension.only_allowed_tools(ToolCallHookEvent("bash", {"command": "tesseract page.png -"}))
-    assert blocked is not None and blocked.block and "bash is not allowed" in str(blocked.reason)
-    for name in ("read", "find_personal_values", "accept_value", "make_copies"):
-        assert extension.only_allowed_tools(ToolCallHookEvent(name, {})) is None
-    assert extension.only_allowed_tools(object()) is None
 
 
 def test_workspace_comes_from_the_environment(monkeypatch):

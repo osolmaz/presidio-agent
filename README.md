@@ -22,7 +22,7 @@ Presidio team.
 | Step | Tool | What it does |
 | --- | --- | --- |
 | Load | poppler, Tesseract | Splits the document into page images with word boxes. A scanned page gets word boxes from Tesseract, and a digital PDF page gets exact ones from its text layer. |
-| Propose | Presidio | Flags candidates in the page's text with Presidio's recognizers, set up for German and English. Optional. |
+| Propose | Presidio | Flags candidates in the page's text with Presidio's recognizers, set up for German and English. `copy --no-presidio` turns it off. |
 | Detect | vision model | Reads every personal value from the page image in two passes: the image alone, then the image with the page's text and Presidio's candidates. Each value comes with its type and owner. Amounts are never replaced, so totals stay consistent. |
 | Decide | Tau agent | Opens the page image for each candidate the vision model did not confirm, and accepts the candidate when it is a person's data or skips it when it is the business's own. |
 | Locate | word boxes, pixels, vision model | Finds every place each value is printed. A value matches words fuzzily with equal digits; a doubtful digit is read again at full resolution, and pixel lines near the model's hint are the fallback when OCR fails. |
@@ -42,10 +42,10 @@ Requirements:
 - a llama.cpp server (`llama-server`) with a vision model and its `--mmproj` projector
 
 ```sh
-pip install "presidio-agent[presidio] @ git+https://github.com/osolmaz/presidio-agent.git"
+pip install "presidio-agent @ git+https://github.com/osolmaz/presidio-agent.git"
 ```
 
-Without the `presidio` extra the vision model works alone. The tested model is
+The install includes Presidio and the German spaCy model it uses for names. The tested model is
 `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` with its vision projector, about 14.7 GB of
 VRAM, so it fits a 16 GB GPU.
 
@@ -67,8 +67,8 @@ The agent has three tools of its own, and Tau's read tool to look at a page imag
 - `accept_value` adds a value the agent decided is personal.
 - `make_copies` makes the copies and reports how each copy did in the read-back and the leak check.
 
-Every other Tau tool is blocked, so the agent cannot write files or run commands. Other
-Tau options, such as `--provider` and `--model`, pass through unchanged.
+Tau's other tools stay available, and the agent's policy leaves every edit to its own
+tools. Other Tau options, such as `--provider` and `--model`, pass through unchanged.
 
 The fixed flow also runs without the agent, for scripts and evals:
 
@@ -115,7 +115,7 @@ twins. Results: [docs](docs/2026-10-05-documents-pdfs-and-the-harness.md#results
 ## Development
 
 See [AGENTS.md](AGENTS.md) for the checks. The tests use fakes in place of the model
-server and OCR, and they skip the Presidio test when Presidio is not installed.
+server and OCR, with one test that runs the real Presidio analyzer.
 
 ## License
 

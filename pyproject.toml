@@ -8,17 +8,15 @@ dependencies = [
     "Pillow>=12.1",
     # Tau with llama.cpp image detection (huggingface/tau#757); move to a release once it is merged.
     "tau-ai @ git+https://github.com/osolmaz/tau.git@d150ff10da1f35da88b74236c11c73daaa2875a2",
+    # Presidio's rule-based recognizers propose candidates, with the German spaCy model for names.
+    "presidio-analyzer==2.2.364",
+    "de_core_news_md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl",
 ]
 
 [project.scripts]
 presidio-agent = "presidio_agent.cli:main"
 
 [project.optional-dependencies]
-# Presidio's rule-based recognizers propose candidates; without them the vision model works alone.
-presidio = [
-    "presidio-analyzer==2.2.364",
-    "de_core_news_md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl",
-]
 dev = ["pytest>=8", "pytest-cov>=5", "pytest-asyncio>=0.24", "ruff>=0.6", "mypy>=1.10", "mutmut>=3.2,<4"]
 
 [build-system]
@@ -71,7 +69,3 @@ module = "tests.*"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 
-[[tool.mypy.overrides]]
-# Presidio is an optional extra; recognizers.py imports it only when it is installed.
-module = "presidio_analyzer.*"
-ignore_missing_imports = true

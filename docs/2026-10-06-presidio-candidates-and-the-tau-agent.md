@@ -32,7 +32,7 @@ source of candidates for the model to check, and never a reason to edit on its o
 
 ## Candidates
 
-`recognizers.py` builds Presidio's analyzer for German. Presidio ships its generic
+`recognizers.py` builds Presidio's analyzer for German, and the analyzer is on by default. Presidio ships its generic
 recognizers (IBAN, e-mail, phone, card, date) for English only, so they are registered
 again for German next to Presidio's German ID recognizers and the `de_core_news_md` name
 recognizer. `candidates.py` keeps the entities worth checking on invoices and drops
@@ -66,8 +66,8 @@ loop of its own. The extension registers three tools over the fixed flow in
 
 The agent's job is the decision the fixed flow cannot make: for each candidate the model
 did not confirm, it opens the page image with Tau's read tool and accepts the candidate
-or skips it. A `tool_call` hook blocks every other Tau tool, so the agent cannot write
-files or run commands such as an OCR engine.
+or skips it. Tau's own tools stay available; the policy leaves every edit to the
+agent's tools and rules out OCR software.
 
 The tools' reports contain original values, so the launcher sets `TAU_HOME` inside the
 private folder and Tau's session logs land there with the other private data.
@@ -83,6 +83,6 @@ and presidio-agent pins Tau to that branch's commit until a release includes it.
 ## Testing
 
 The new modules are tested against fakes of the model and OCR and of Presidio, so the
-tests run without a server. One test runs the real Presidio analyzer when the `presidio` extra is
-installed. `candidates.py` is under mutation testing with the other pure modules, and the
+tests run without a server. One test runs the real Presidio analyzer, which is a regular dependency
+and on by default. `candidates.py` is under mutation testing with the other pure modules, and the
 whole set kills 88.7% of mutants against the floor of 85%.

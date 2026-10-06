@@ -16,7 +16,6 @@ from typing import Protocol
 from tau_agent.messages import TextContent
 from tau_agent.tools import AgentTool, AgentToolResult, ToolCancellationToken, ToolUpdateCallback
 from tau_agent.types import JSONValue
-from tau_coding.extensions import ToolCallHookEvent, ToolCallHookResult
 
 from presidio_agent import detect, recognizers
 from presidio_agent.pipeline import Workspace
@@ -29,9 +28,6 @@ DEFAULT_PRIVATE = "/dev/shm/presidio-agent/private"
 
 Run = Callable[[Mapping[str, JSONValue]], Report]
 
-# The agent reads files (a page image, to decide about a candidate) and uses this module's
-# tools. It never writes or edits files or runs commands, so every other tool is blocked.
-ALLOWED_TOOLS = frozenset({"read", "find_personal_values", "accept_value", "make_copies"})
 
 PATH: dict[str, JSONValue] = {"type": "string", "description": "path of the document: an image or a PDF"}
 
@@ -118,27 +114,14 @@ def agent_tools(session: Session) -> list[AgentTool]:
     ]
 
 
-def only_allowed_tools(event: object, context: object = None) -> ToolCallHookResult | None:
-    """Tau's `tool_call` hook: block any tool the agent is not meant to use, and tell it why."""
-    if isinstance(event, ToolCallHookEvent) and event.tool_name not in ALLOWED_TOOLS:
-        return ToolCallHookResult(
-            block=True,
-            reason=f"presidio-agent only reads files and uses its own tools; {event.tool_name} is not allowed",
-        )
-    return None
-
-
 class _Api(Protocol):
     """The part of Tau's extension API this module uses."""
 
     def register_tool(self, tool: AgentTool) -> None: ...
 
-    def on(self, event: str, handler: Callable[[object, object], object]) -> object: ...
-
 
 def setup(tau: _Api) -> None:
-    """Tau's entry point: register the tools over one session's documents, and block all others."""
+    """Tau's entry point: register the tools over one session's documents."""
     session = Session(workspace(), recognizers.analyzer())
     for agent_tool in agent_tools(session):
         tau.register_tool(agent_tool)
-    tau.on("tool_call", only_allowed_tools)
