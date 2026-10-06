@@ -40,6 +40,9 @@ OCR; one test runs the real Presidio analyzer.
 - The agent decides; the edits come from its tools (`tools.py`, exposed to Tau by
   `extension.py`), which run the fixed flow in `pipeline.py`. Tau's own tools stay
   available, and the policy (`agent.md`) keeps the agent from editing copies itself.
+- Configure through command-line options only (`settings.py`), never environment
+  variables. The launcher sets `LLAMA_BASE_URL` and `TAU_HOME` only because Tau's
+  own code reads them.
 - Never trust OCR text as a value. The model reads values; OCR and pixels only
   give positions.
 - Privacy: the public answer key holds new values only. Old values, the
