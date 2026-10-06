@@ -45,8 +45,7 @@ alone, so a candidate cannot steer what the model reads first.
 
 The managing-director gap is closed by the agent and not by the detection prompt. A
 sentence in the first-pass prompt asking for the names of the business's managers made
-Bonsai list the whole footer instead: the shop's phone numbers, addresses, VAT and
-register numbers, and bank details. On invoice B (`drucker-3.jpg`) the count went from 9
+Bonsai list the whole footer instead, down to the shop's phone numbers and bank details. On invoice B (`drucker-3.jpg`) the count went from 9
 values to 41, and a narrower wording either did the same (38) or dropped the director
 (10). The 2-bit model cannot hold that one exception next to the rule that excludes the
 business's details. The original prompt stays, Presidio flags the director's name as a
