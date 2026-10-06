@@ -21,6 +21,8 @@ class Settings:
     model: str | None = None  # None: the model the server reports
     out: str = DEFAULT_OUT  # copies, page images, public answer keys
     private: str = DEFAULT_PRIVATE  # original personal data: never serve or share
+    no_approval: bool = False  # run every tool without asking, for this session only
+    approve_read_tools: bool = False  # ask before read-only tools too
 
 
 _current = Settings()
@@ -47,5 +49,20 @@ def add_arguments(ap: argparse.ArgumentParser) -> None:
     )
 
 
+def add_agent_arguments(ap: argparse.ArgumentParser) -> None:
+    """The agent's own options, after the shared ones."""
+    add_arguments(ap)
+    ap.add_argument("--no-approval", action="store_true", help="run every tool without asking, for this session")
+    ap.add_argument("--approve-read-tools", action="store_true", help="ask before read-only tools too")
+
+
 def from_arguments(a: argparse.Namespace) -> Settings:
-    return replace(Settings(), base_url=a.base_url.rstrip("/"), model=a.model, out=a.out, private=a.private)
+    return replace(
+        Settings(),
+        base_url=a.base_url.rstrip("/"),
+        model=a.model,
+        out=a.out,
+        private=a.private,
+        no_approval=getattr(a, "no_approval", False),
+        approve_read_tools=getattr(a, "approve_read_tools", False),
+    )

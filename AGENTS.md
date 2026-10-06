@@ -43,6 +43,9 @@ OCR; one test runs the real Presidio analyzer.
 - Configure through command-line options only (`settings.py`), never environment
   variables. The launcher sets `LLAMA_BASE_URL` and `TAU_HOME` only because Tau's
   own code reads them.
+- Keep the tool approval gate (`approval.py`) on by default, as in localpi. Tools
+  that only read, and the package's own tools, run without asking; anything that
+  can write or run commands asks, and a denied call must reach the model as blocked.
 - Never trust OCR text as a value. The model reads values; OCR and pixels only
   give positions.
 - Privacy: the public answer key holds new values only. Old values, the

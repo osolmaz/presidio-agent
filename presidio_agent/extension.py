@@ -16,7 +16,7 @@ from tau_agent.messages import TextContent
 from tau_agent.tools import AgentTool, AgentToolResult, ToolCancellationToken, ToolUpdateCallback
 from tau_agent.types import JSONValue
 
-from presidio_agent import detect, recognizers, settings
+from presidio_agent import approval, detect, recognizers, settings
 from presidio_agent.pipeline import Workspace
 from presidio_agent.tools import Report, Session
 
@@ -114,9 +114,34 @@ class _Api(Protocol):
 
     def register_tool(self, tool: AgentTool) -> None: ...
 
+    def on(self, event: str, handler: Callable[..., object]) -> object: ...
+
+    def register_command(self, name: str, handler: Callable[..., object], *, description: str, usage: str) -> None: ...
+
+
+def show_permission(gate: approval.Gate) -> Callable[[object, object], None]:
+    """At session start, show that the gate is off, so the state stays visible."""
+
+    def handle(event: object, context: object = None) -> None:
+        ui = getattr(context, "ui", None)
+        if gate.permission == "allow" and ui is not None and ui.has_ui:
+            ui.notify("permission: allow (tools run without asking)", "warning")
+
+    return handle
+
 
 def setup(tau: _Api) -> None:
-    """Tau's entry point: register the tools over one session's documents."""
+    """Tau's entry point: register the tools over one session's documents, and the approval gate."""
+    chosen = settings.current()
     session = Session(workspace(), recognizers.analyzer())
     for agent_tool in agent_tools(session):
         tau.register_tool(agent_tool)
+    gate = approval.Gate(approval.startup_permission(chosen.no_approval, chosen.private), chosen.approve_read_tools)
+    tau.on("tool_call", gate.on_tool_call)
+    tau.on("session_start", show_permission(gate))
+    tau.register_command(
+        "approval",
+        approval.approval_command(chosen.private, gate),
+        description="Ask before tools that change files or run commands, or allow them",
+        usage="/approval [ask|allow]",
+    )
