@@ -18,7 +18,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from synthero import ocr
+from presidio_agent import ocr
 
 XHTML = "{http://www.w3.org/1999/xhtml}"
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".webp", ".bmp"}

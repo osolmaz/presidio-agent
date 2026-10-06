@@ -2,13 +2,13 @@
 date: 2026-10-05
 author: Onur Solmaz <2453968+osolmaz@users.noreply.github.com>
 title: Documents, digital PDFs, and the synthetic data harness
-tags: [synthero, pdf, ocr, fonts, barcodes, eval, design]
+tags: [presidio-agent, pdf, ocr, fonts, barcodes, eval, design]
 ---
 
 # Documents, digital PDFs, and the synthetic data harness
 
 This note follows [Value-first detection](2026-10-05-value-first-detection.md).
-It records how synthero grew from one scanned page to whole documents of any
+It records how presidio-agent grew from one scanned page to whole documents of any
 kind, and what each change fixed.
 
 ## Goal
@@ -16,7 +16,7 @@ kind, and what each change fixed.
 A harness that makes synthetic copies of invoices and receipts with all personal
 data replaced, accurately enough that no original value survives, on one 16 GB
 GPU. The models are Ternary Bonsai 27B (PQ2_0, about 14.7 GB with its vision
-projector, through the Llama app on khazaddum) and Tesseract. Qwen-Image was
+projector, through the Llama app on a laptop with a 16 GB GPU) and Tesseract. Qwen-Image was
 considered for redrawing crops: see [Qwen-Image](#qwen-image).
 
 ## Architecture
@@ -88,15 +88,15 @@ Whole-page Qwen-Image edits mixed values up and garbled small text
 (see the notes repo, `2026-10-03-qwen-image-invoice-edits.md`). The useful role
 left is a crop-level edit for text whose font no installed font matches, accepted
 only when Bonsai reads the new value back. Editing needs the encoder's vision
-weights (`mmproj-BF16.gguf`), now downloaded on khazaddum, and a server started
-with `--llm_vision`. Restarting the khazaddum Qwen-Image server for that was not
+weights (`mmproj-BF16.gguf`), now downloaded on the test laptop, and a server started
+with `--llm_vision`. Restarting the Qwen-Image server for that was not
 allowed in this session, so it is not tested. The font vote already matches the
 fixture's fonts closely, so the gain is unclear.
 
 ## Results
 
 Model: `prism-ml/Ternary-Bonsai-2-27B-gguf:PQ2_0` through the Llama app on
-khazaddum (RTX 3080 Laptop, 16 GB; about 14.7 GB used). Tesseract 5.3.4,
+a laptop with an RTX 3080 Laptop GPU (16 GB; about 14.7 GB used). Tesseract 5.3.4,
 poppler, one copy per document.
 
 ### Development runs

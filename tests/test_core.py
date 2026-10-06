@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 from PIL import Image, ImageDraw, ImageFont
 
-from synthero import barcode, cli, detect, geometry, leak, locate, match, ocr, render, synth, values, vl
-from synthero import page as synthero_page
-from synthero.detect import Value
+from presidio_agent import barcode, cli, detect, geometry, leak, locate, match, ocr, render, synth, values, vl
+from presidio_agent import page as report_page
+from presidio_agent.detect import Value
 
 FONT = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 
@@ -300,7 +300,7 @@ def test_page_shows_new_values_only(tmp_path):
         ],
     }
     (tmp_path / "scan.copy-1.json").write_text(json.dumps(key))
-    html_text = Path(synthero_page.build(str(tmp_path))).read_text(encoding="utf-8")
+    html_text = Path(report_page.build(str(tmp_path))).read_text(encoding="utf-8")
     assert "MIRA VOGT" in html_text and "Leak check passed" in html_text and "1 barcodes scrambled" in html_text
     assert "scan.copy-1.p1.png" in html_text
 
@@ -324,15 +324,13 @@ def test_cli_end_to_end_with_fake_model_and_ocr(tmp_path, monkeypatch, capsys):
         Value("60120873", "id", "customer", (0, 50, 600, 80)),
     ]
     monkeypatch.setattr(ocr, "lines", lambda img: lines)
-    monkeypatch.setattr(detect, "find_values", lambda img, text: found)
+    monkeypatch.setattr(detect, "find_values", lambda img, text, flagged=(): found)
     monkeypatch.setattr(vl, "read_text", lambda img: "")
     monkeypatch.setattr(vl, "read_page", lambda img: "Kunde: Kd-Nr.:")
     out, private = tmp_path / "out", tmp_path / "private"
-    monkeypatch.setattr(
-        "sys.argv", ["synthero", str(tmp_path / "scan.png"), "--n", "2", "--out", str(out), "--private", str(private)]
-    )
-    cli.main()
-    cli.main()  # the second run reads the cached analysis
+    argv = ["copy", str(tmp_path / "scan.png"), "--n", "2", "--out", str(out), "--private", str(private)]
+    cli.main([*argv, "--no-presidio"])
+    cli.main([*argv, "--no-presidio"])  # the second run reads the cached analysis
     printed = capsys.readouterr().out
     assert "page 1 (scan): 2 personal values, 2 located in 2 places (2 by OCR, 0 by pixels)" in printed
     assert "copy 2: 2 values replaced, 0 read back correctly, 0 barcodes scrambled, leak check passed" in printed

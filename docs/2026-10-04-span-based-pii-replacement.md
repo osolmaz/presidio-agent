@@ -2,14 +2,14 @@
 date: 2026-10-04
 author: Onur Solmaz <2453968+osolmaz@users.noreply.github.com>
 title: Span-based PII replacement
-tags: [synthero, pii, design, plan]
+tags: [presidio-agent, pii, design, plan]
 ---
 
 # Span-based PII replacement
 
 ## Problem
 
-synthero labelled whole lines with one field type, and code then guessed which
+presidio-agent labelled whole lines with one field type, and code then guessed which
 part of the line was the value. The guesses were hard-coded: a list of titles
 (`HERR`, `FRAU`) to keep in front of a name, a `label:` pattern for numbers, and
 a list of common words that the leak check ignores. They failed on a line such
@@ -72,7 +72,7 @@ every word it covers has an OCR box with ink in it that is not taller than about
 ## Results
 
 On page 2 of `drucker.pdf`, with Ternary Bonsai 2 27B PQ2_0 through the Llama
-app on khazaddum (14.7 GB of the 16 GB GPU), about 100 s per run of two copies:
+app on a laptop (14.7 GB of its 16 GB GPU), about 100 s per run of two copies:
 
 - Positions: Bonsai alone located 10 of 12 spans; with Tesseract boxes, 14 of 15.
 - The `Verkäufer:` label stays, and the salesperson, manager, and customer get

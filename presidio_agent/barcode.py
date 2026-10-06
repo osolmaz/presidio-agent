@@ -14,7 +14,7 @@ from collections.abc import Sequence
 
 from PIL import Image, ImageDraw
 
-from synthero.geometry import Box, bands, ink_threshold, pixels
+from presidio_agent.geometry import Box, bands, ink_threshold, pixels
 
 # Bar and space widths (in modules) of the Code 128 symbols 0..105 and the stop
 # pattern, from the standard (ISO/IEC 15417).

@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python: ["3.11", "3.12"]
+        python: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -22,8 +22,8 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       - run: ruff format --check .
       - run: ruff check .
-      - run: mypy synthero tests
-      - run: pytest --cov=synthero --cov-fail-under=85
+      - run: mypy presidio_agent tests
+      - run: pytest --cov=presidio_agent --cov-fail-under=85
       - name: Mutation testing behind the kill-rate floor
         run: python scripts/check-mutation.py --min-kill-rate 85
       - name: Audit dependencies

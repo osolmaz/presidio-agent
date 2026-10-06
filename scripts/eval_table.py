@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Summarise an eval folder (scripts/eval.sh) as a Markdown table, from the public keys only.
 
-python scripts/eval_table.py /dev/shm/synthero/eval
+python scripts/eval_table.py /dev/shm/presidio-agent/eval
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ def row(set_name: str, key_path: Path) -> str:
 
 
 def main() -> None:
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else "/dev/shm/synthero/eval")
+    root = Path(sys.argv[1] if len(sys.argv) > 1 else "/dev/shm/presidio-agent/eval")
     print("| Set | Document | Pages | Values | Located | Edited | Read back | Barcodes scrambled | Leak check |")
     print("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for set_name in ("real", "sim", "digital"):

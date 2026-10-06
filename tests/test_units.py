@@ -7,8 +7,8 @@ import random
 import pytest
 from PIL import Image, ImageDraw
 
-from synthero import barcode, dates, detect, geometry, leak, locate, match, render, values
-from synthero.detect import Value
+from presidio_agent import barcode, dates, detect, geometry, leak, locate, match, render, values
+from presidio_agent.detect import Value
 
 
 def blank(w: int = 100, h: int = 60) -> Image.Image:

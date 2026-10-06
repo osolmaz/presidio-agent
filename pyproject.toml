@@ -1,29 +1,39 @@
 [project]
-name = "synthero"
+name = "presidio-agent"
 version = "0.1.0"
-description = "Synthetic copies of scanned documents with consistent invented personal data"
-requires-python = ">=3.11"
-dependencies = ["Pillow>=12.1"]
+description = "A local agent that de-identifies documents: Presidio finds candidates, a vision model decides, and every value is redrawn in place"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+    "Pillow>=12.1",
+    # Tau with llama.cpp image detection (huggingface/tau#757); move to a release once it is merged.
+    "tau-ai @ git+https://github.com/osolmaz/tau.git@d150ff10da1f35da88b74236c11c73daaa2875a2",
+]
 
 [project.scripts]
-synthero = "synthero.cli:main"
+presidio-agent = "presidio_agent.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "mypy>=1.10", "mutmut>=3.2,<4"]
+# Presidio's rule-based recognizers propose candidates; without them the vision model works alone.
+presidio = [
+    "presidio-analyzer==2.2.364",
+    "de_core_news_md @ https://github.com/explosion/spacy-models/releases/download/de_core_news_md-3.8.0/de_core_news_md-3.8.0-py3-none-any.whl",
+]
+dev = ["pytest>=8", "pytest-cov>=5", "pytest-asyncio>=0.24", "ruff>=0.6", "mypy>=1.10", "mutmut>=3.2,<4"]
 
 [build-system]
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["synthero"]
+packages = ["presidio_agent"]
 
 [tool.setuptools.package-data]
-synthero = ["py.typed"]
+presidio_agent = ["py.typed", "agent.md"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py312"
 extend-exclude = ["mutants"]
 
 [tool.ruff.lint]
@@ -50,13 +60,18 @@ testpaths = ["tests"]
 # Mutation targets the pure logic that decides what is personal data and where it is;
 # cli.py, vl.py, and ocr.py are IO and are covered by behaviour tests.
 [tool.mutmut]
-paths_to_mutate = ["synthero/match.py", "synthero/geometry.py", "synthero/values.py", "synthero/leak.py",
-                   "synthero/detect.py", "synthero/barcode.py", "synthero/dates.py"]
+paths_to_mutate = ["presidio_agent/candidates.py", "presidio_agent/match.py", "presidio_agent/geometry.py", "presidio_agent/values.py", "presidio_agent/leak.py",
+                   "presidio_agent/detect.py", "presidio_agent/barcode.py", "presidio_agent/dates.py"]
 tests_dir = ["tests/"]
-also_copy = ["synthero/"]
+also_copy = ["presidio-agent/"]
 
 [[tool.mypy.overrides]]
 # Tests are exempt from annotation coverage, as in Ruff above.
 module = "tests.*"
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+# Presidio is an optional extra; recognizers.py imports it only when it is installed.
+module = "presidio_analyzer.*"
+ignore_missing_imports = true

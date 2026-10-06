@@ -2,22 +2,23 @@ python:
   coverage:
     threshold: 85
     paths:
-      - synthero
+      - presidio_agent
   complexity:
     max: 8
   dry:
     max_findings: 0
     paths:
-      - synthero
+      - presidio_agent
     copied_blocks:
       enabled: true
       min_tokens: 100
   mutation:
     targets:
-      - synthero/match.py
-      - synthero/geometry.py
-      - synthero/values.py
-      - synthero/leak.py
-      - synthero/detect.py
-      - synthero/barcode.py
-      - synthero/dates.py
+      - presidio_agent/candidates.py
+      - presidio_agent/match.py
+      - presidio_agent/geometry.py
+      - presidio_agent/values.py
+      - presidio_agent/leak.py
+      - presidio_agent/detect.py
+      - presidio_agent/barcode.py
+      - presidio_agent/dates.py

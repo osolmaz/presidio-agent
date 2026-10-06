@@ -11,7 +11,7 @@ from __future__ import annotations
 import random
 import re
 
-from synthero import dates
+from presidio_agent import dates
 
 FIRST = ["Jonas", "Mira", "Selin", "Tobias", "Lena", "Arda", "Clara", "Noah", "Ida", "Emil", "Nora", "Felix"]
 LAST = ["Brandt", "Okafor", "Aydin", "Kessler", "Vogt", "Lindqvist", "Hahn", "Moreau", "Petrovic", "Sauer"]

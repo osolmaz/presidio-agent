@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from PIL import Image
 
-from synthero.geometry import Box
+from presidio_agent.geometry import Box
 
 JUNK = "|[]\\{}"  # what Tesseract makes of cell borders and specks
 

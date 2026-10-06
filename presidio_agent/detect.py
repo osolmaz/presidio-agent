@@ -7,11 +7,12 @@ The rough box is only a hint for where to look; positions come from OCR and pixe
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from PIL import Image
 
-from synthero import vl
+from presidio_agent import vl
 
 EDGE_PUNCTUATION = " \t:;,=-\u2013\u2014|("  # a label's colon, a list's comma, a title's dash: not the value
 TYPES = ("person", "street", "city", "email", "phone", "date", "time", "id", "card", "iban")
@@ -20,9 +21,10 @@ PROMPT = """This is a scanned invoice or receipt. List every piece of personal d
 transaction identifier that must change in a new synthetic copy: people's names, the customer's
 address (the postal code and city together, as printed), e-mail, phone, customer, contract, order,
 receipt, trace, terminal, and approval numbers, card numbers (payment, loyalty, customer cards) and
-IBANs, the number printed under a barcode, dates and times. Do not list
-the business's own name, address, phone, tax numbers, or bank details, amounts or prices, product or
-article numbers, or labels such as "Datum:" or "Kd-Nr.:". List a value once even if it is printed
+IBANs, the number printed under a barcode, dates and times. People are always personal data: also
+list people named as the business's managers or owners, such as "Geschäftsführer: Julia Kern". Do not
+list the business's own name, address, phone, tax numbers, or bank details, amounts or prices, product
+or article numbers, or labels such as "Datum:" or "Kd-Nr.:". List a value once even if it is printed
 several times.
 
 For each piece give:
@@ -43,11 +45,17 @@ only to notice what may be missing. List every piece of personal data about a cu
 member, or transaction identifier, that is printed on the page but missing above, in the same JSON
 format (text as printed in the image, type, owner, bbox_2d). Still do not list the business's own
 name, address, e-mail, web site, phone, tax, register, or bank details, amounts, prices, points or
-bonus balances, product or article numbers, or labels. Answer with only a JSON array, [] if nothing
-is missing.
-
+bonus balances, product or article numbers, or labels; people's names are always personal. Answer with
+only a JSON array, [] if nothing is missing.
+{flagged}
 OCR text:
 {ocr}"""
+
+FLAGGED = """
+A rule-based detector flagged these strings in the text. Each is only a candidate: check it against
+the image, and list it if it is personal data and missing above.
+{candidates}
+"""
 
 DATE = re.compile(r"\d{1,2}\.\d{1,2}\.(\d{2,4})?")
 TIME = re.compile(r"\d{1,2}:\d{2}(:\d{2})?")
@@ -136,12 +144,19 @@ def normalise(values: list[Value]) -> list[Value]:
     return out
 
 
-def find_values(scan: Image.Image, ocr_text: str) -> list[Value]:
-    """Two passes: the image alone, then the image with the OCR text, for what the first pass missed."""
+def review_prompt(found: list[Value], ocr_text: str, flagged: Sequence[str] = ()) -> str:
+    """The second pass's question: what is missing from `found`, with the OCR text and any flagged candidates."""
+    listed = "\n".join(f"- {v.type}: {v.text}" for v in found) or "(none)"
+    hints = FLAGGED.format(candidates="\n".join(f"- {text}" for text in flagged)) if flagged else ""
+    return REVIEW.format(found=listed, ocr=ocr_text, flagged=hints)
+
+
+def find_values(scan: Image.Image, ocr_text: str, flagged: Sequence[str] = ()) -> list[Value]:
+    """Two passes: the image alone, then the image with the OCR text and Presidio's candidates,
+    for what the first pass missed."""
     prompt = PROMPT.format(types=", ".join(TYPES))
     first = parse(vl.parse_objects(vl.chat([vl.image_part(scan), vl.text_part(prompt)], max_tokens=4096)), *scan.size)
-    found = "\n".join(f"- {v.type}: {v.text}" for v in first) or "(none)"
-    review = REVIEW.format(found=found, ocr=ocr_text)
+    review = review_prompt(first, ocr_text, flagged)
     second = vl.parse_objects(
         vl.chat([vl.image_part(scan), vl.text_part(prompt), vl.text_part(review)], max_tokens=4096)
     )
